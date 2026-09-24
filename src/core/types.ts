@@ -27,6 +27,30 @@ export interface InteractHandle {
 }
 
 /**
+ * Handle returned by scroll trigger animations (plays on viewport enter).
+ */
+export interface ScrollTriggerHandle {
+  /** Promise that resolves when the trigger animation finishes naturally or is canceled. */
+  finished: Promise<void>;
+  /** Cancels the active trigger animation. */
+  cancel: () => void;
+  /** Completely destroys the trigger observer and reverts DOM changes. */
+  destroy: () => void;
+}
+
+/**
+ * Handle returned by scroll scrub animations (progress tied directly to scroll position).
+ */
+export interface ScrollScrubHandle {
+  /** Completely destroys the scrub observer and scroll listeners, and reverts DOM changes. */
+  destroy: () => void;
+  /** Pauses progress updates. */
+  pause: () => void;
+  /** Resumes progress updates. */
+  resume: () => void;
+}
+
+/**
  * Common options accepted by typographic animation functions.
  */
 export interface BaseOptions {
@@ -54,4 +78,36 @@ export interface BaseInteractOptions {
   touch?: 'follow' | 'tap' | 'none';
   /** Whether to respect user prefers-reduced-motion preference. Defaults to true. */
   respectReducedMotion?: boolean;
+}
+
+/**
+ * Common options accepted by scroll-based animations and effects.
+ */
+export interface BaseScrollOptions {
+  /** Viewport start trigger position (e.g. "top 80%"). Defaults to "top 80%". */
+  start?: string;
+  /** Viewport end trigger position (e.g. "top 20%"). Defaults to "top 20%". */
+  end?: string;
+  /** Intersection threshold ratio (0..1). Defaults to 0. */
+  threshold?: number;
+  /** Whether to respect user prefers-reduced-motion preference. Defaults to true. */
+  respectReducedMotion?: boolean;
+}
+
+/**
+ * Options accepted by scroll trigger mode animations.
+ */
+export interface BaseScrollTriggerOptions extends BaseScrollOptions, BaseOptions {
+  /** Whether the animation should re-trigger every time the element enters the viewport instead of playing once. Defaults to false. */
+  repeat?: boolean;
+  /** Alias for repeat = false. If true, animation triggers only once. Defaults to true. */
+  once?: boolean;
+}
+
+/**
+ * Options accepted by scroll scrub mode animations.
+ */
+export interface BaseScrollScrubOptions extends BaseScrollOptions {
+  /** Smoothing lerp factor for scrub progress (0..1). 1 means instant scroll tracking. Defaults to 1. */
+  smooth?: number;
 }

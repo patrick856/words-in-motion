@@ -17,6 +17,7 @@
     "outro",
     "loop",
     "interact",
+    "scroll",
     "web animations api"
   ],
   "type": "module",
@@ -49,6 +50,11 @@
       "types": "./dist/interact/index.d.ts",
       "import": "./dist/interact/index.js",
       "require": "./dist/interact/index.cjs"
+    },
+    "./scroll": {
+      "types": "./dist/scroll/index.d.ts",
+      "import": "./dist/scroll/index.js",
+      "require": "./dist/scroll/index.cjs"
     }
   },
   "main": "./dist/index.cjs",

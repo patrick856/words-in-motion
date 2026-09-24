@@ -183,6 +183,27 @@ button:hover {
   min-height: 120px;
 }
 
+.scroll-wrapper {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  padding: 0 1rem;
+  background-color: var(--bg-color);
+}
+
+.scroll-spacer {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .empty-state {
   background-color: var(--card-bg);
   border: 1px dashed var(--border-color);

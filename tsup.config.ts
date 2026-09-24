@@ -7,6 +7,7 @@ export default defineConfig({
     'loop/index': 'src/loop/index.ts',
     'outro/index': 'src/outro/index.ts',
     'interact/index': 'src/interact/index.ts',
+    'scroll/index': 'src/scroll/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: false,
