@@ -16,6 +16,7 @@
     "intro",
     "outro",
     "loop",
+    "interact",
     "web animations api"
   ],
   "type": "module",
@@ -43,6 +44,11 @@
       "types": "./dist/outro/index.d.ts",
       "import": "./dist/outro/index.js",
       "require": "./dist/outro/index.cjs"
+    },
+    "./interact": {
+      "types": "./dist/interact/index.d.ts",
+      "import": "./dist/interact/index.js",
+      "require": "./dist/interact/index.cjs"
     }
   },
   "main": "./dist/index.cjs",
@@ -65,7 +71,7 @@
     "jsdom": "^29.1.1",
     "prettier": "^3.9.9",
     "tsup": "^8.5.1",
-    "typescript": "^5.7.3",
+    "typescript": "5.7.3",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"
   }

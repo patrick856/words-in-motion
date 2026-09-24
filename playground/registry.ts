@@ -1,7 +1,9 @@
 export interface AnimationEntry {
   name: string;
-  category: 'intro' | 'loop' | 'outro';
-  run: (el: HTMLElement) => { finished?: Promise<void>; cancel?: () => void } | void;
+  category: 'intro' | 'loop' | 'outro' | 'interact';
+  run: (
+    el: HTMLElement
+  ) => { finished?: Promise<void>; cancel?: () => void; destroy?: () => void; pause?: () => void; resume?: () => void } | void;
 }
 
 /**
