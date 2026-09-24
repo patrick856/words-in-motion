@@ -1,0 +1,72 @@
+{
+  "name": "words-in-motion",
+  "version": "0.0.1",
+  "description": "Typographic motion for the web.",
+  "author": "Patrick Marcus",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/patrick856/words-in-motion.git"
+  },
+  "keywords": [
+    "text animation",
+    "typography",
+    "kinetic typography",
+    "split text",
+    "intro",
+    "outro",
+    "loop",
+    "web animations api"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./intro": {
+      "types": "./dist/intro/index.d.ts",
+      "import": "./dist/intro/index.js",
+      "require": "./dist/intro/index.cjs"
+    },
+    "./loop": {
+      "types": "./dist/loop/index.d.ts",
+      "import": "./dist/loop/index.js",
+      "require": "./dist/loop/index.cjs"
+    },
+    "./outro": {
+      "types": "./dist/outro/index.d.ts",
+      "import": "./dist/outro/index.js",
+      "require": "./dist/outro/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup && tsc --emitDeclarationOnly",
+    "dev": "tsup --watch",
+    "playground": "vite playground",
+    "typecheck": "tsc --project tsconfig.typecheck.json",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@typescript-eslint/eslint-plugin": "^8.70.1",
+    "@typescript-eslint/parser": "^8.70.1",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.9.9",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}
