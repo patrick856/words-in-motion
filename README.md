@@ -2,8 +2,6 @@
 
 > Typographic motion for the web.
 
-![words-in-motion demo](https://via.placeholder.com/800x400?text=words-in-motion+demo)
-
 A lightweight collection of standalone, ready-to-use typographic animations and cursor-reactive effects for the web built natively on the **Web Animations API (WAAPI)** and canvas/inline transforms. Zero dependencies. Tree-shakeable. Accessible.
 
 ---
