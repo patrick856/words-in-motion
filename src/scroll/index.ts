@@ -1,3 +1,7 @@
+export { waveRelay, type WaveRelayOptions } from './waveRelay';
+export { readingLine, type ReadingLineOptions } from './readingLine';
+export { scatterReassemble, type ScatterReassembleOptions } from './scatterReassemble';
+
 export {
   createScrollTrigger,
   createScrollScrub,
