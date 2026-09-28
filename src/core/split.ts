@@ -9,6 +9,7 @@ export interface SplitWordsResult {
 export interface SplitCharsResult {
   chars: HTMLElement[];
   revert: () => void;
+  granularity: 'char' | 'word';
 }
 
 interface SegmenterInstance {
@@ -70,13 +71,17 @@ export function splitWords(target: Target): SplitWordsResult {
 
   element.textContent = '';
 
+  const ws = typeof window !== 'undefined' ? window.getComputedStyle(element).whiteSpace : 'normal';
+  const preserveNewlines = ['pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(ws);
+
   const words: HTMLElement[] = [];
-  const lines = text.split('\n');
+  const lines = preserveNewlines ? text.split('\n') : [text.replace(/\s+/g, ' ').trim()];
 
   lines.forEach((lineText, lineIndex) => {
     const wordTokens = lineText.trim().split(/\s+/).filter(Boolean);
     wordTokens.forEach((wordText, wordIndex) => {
       const wordSpan = document.createElement('span');
+      wordSpan.classList.add('wim-word');
       wordSpan.style.display = 'inline-block';
       wordSpan.style.whiteSpace = 'nowrap';
       wordSpan.setAttribute('aria-hidden', 'true');
@@ -90,7 +95,7 @@ export function splitWords(target: Target): SplitWordsResult {
       }
     });
 
-    if (lineIndex < lines.length - 1) {
+    if (preserveNewlines && lineIndex < lines.length - 1) {
       element.appendChild(document.createElement('br'));
     }
   });
@@ -114,7 +119,7 @@ export function splitWords(target: Target): SplitWordsResult {
 export function splitChars(target: Target): SplitCharsResult {
   const element = resolveElement(target);
   if (!element) {
-    return { chars: [], revert: () => {} };
+    return { chars: [], revert: () => {}, granularity: 'char' };
   }
 
   const text = element.textContent || '';
@@ -122,7 +127,7 @@ export function splitChars(target: Target): SplitCharsResult {
   // Fall back to word-level splitting for connected scripts or RTL
   if (isJoinedScriptOrRtl(element, text)) {
     const wordResult = splitWords(element);
-    return { chars: wordResult.words, revert: wordResult.revert };
+    return { chars: wordResult.words, revert: wordResult.revert, granularity: 'word' };
   }
 
   const originalHTML = element.innerHTML;
@@ -134,13 +139,17 @@ export function splitChars(target: Target): SplitCharsResult {
 
   element.textContent = '';
 
+  const ws = typeof window !== 'undefined' ? window.getComputedStyle(element).whiteSpace : 'normal';
+  const preserveNewlines = ['pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(ws);
+
   const chars: HTMLElement[] = [];
-  const lines = text.split('\n');
+  const lines = preserveNewlines ? text.split('\n') : [text.replace(/\s+/g, ' ').trim()];
 
   lines.forEach((lineText, lineIndex) => {
     const wordTokens = lineText.trim().split(/\s+/).filter(Boolean);
     wordTokens.forEach((wordText, wordIndex) => {
       const wordSpan = document.createElement('span');
+      wordSpan.classList.add('wim-word');
       wordSpan.style.display = 'inline-block';
       wordSpan.style.whiteSpace = 'nowrap';
       wordSpan.setAttribute('aria-hidden', 'true');
@@ -148,6 +157,7 @@ export function splitChars(target: Target): SplitCharsResult {
       const graphemes = segmentGraphemes(wordText);
       graphemes.forEach((charText) => {
         const charSpan = document.createElement('span');
+        charSpan.classList.add('wim-char');
         charSpan.style.display = 'inline-block';
         charSpan.setAttribute('aria-hidden', 'true');
         charSpan.textContent = charText;
@@ -163,7 +173,7 @@ export function splitChars(target: Target): SplitCharsResult {
       }
     });
 
-    if (lineIndex < lines.length - 1) {
+    if (preserveNewlines && lineIndex < lines.length - 1) {
       element.appendChild(document.createElement('br'));
     }
   });
@@ -177,5 +187,5 @@ export function splitChars(target: Target): SplitCharsResult {
     }
   };
 
-  return { chars, revert };
+  return { chars, revert, granularity: 'char' };
 }

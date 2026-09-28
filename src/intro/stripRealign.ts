@@ -1,5 +1,5 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle } from '../core/motion';
+import { resolveElement, prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro } from '../core/motion';
 
 export interface StripRealignOptions extends BaseOptions {
   /** Number of horizontal strips per line. Defaults to 4. */
@@ -8,26 +8,17 @@ export interface StripRealignOptions extends BaseOptions {
   maxOffset?: number;
 }
 
-/**
- * Generates randomized puzzle-solving keyframes for a single horizontal strip.
- * The strip shifts and pauses at trial positions (like sliding puzzle pieces testing fits)
- * before snapping definitively into alignment.
- */
 function generatePuzzleIntroKeyframes(maxOffset: number): Keyframe[] {
   const sign = Math.random() < 0.5 ? -1 : 1;
   const initialDist = Math.round(sign * (0.8 + Math.random() * 0.45) * maxOffset);
 
-  // Randomized time points with brief pauses ("checking the fit")
   const t1 = 0.18 + Math.random() * 0.08;
   const t1Hold = t1 + 0.06 + Math.random() * 0.05;
-
   const t2 = t1Hold + 0.18 + Math.random() * 0.08;
   const t2Hold = Math.min(0.72, t2 + 0.06 + Math.random() * 0.05);
-
   const t3 = t2Hold + 0.12 + Math.random() * 0.06;
   const tSolve = Math.min(0.95, t3 + 0.08 + Math.random() * 0.06);
 
-  // Puzzle hunt trial offsets with alternating direction and narrowing amplitude
   const pos1 = Math.round(-initialDist * (0.45 + Math.random() * 0.25));
   const pos2 = Math.round(initialDist * (0.18 + Math.random() * 0.18));
   const pos3 = Math.round(-initialDist * (0.05 + Math.random() * 0.08));
@@ -49,37 +40,36 @@ function generatePuzzleIntroKeyframes(maxOffset: number): Keyframe[] {
  * Slices each line of text into horizontal puzzle strips enclosed in display boxes
  * so when any strip slides out past the boundary it is clipped and hidden.
  */
-export function stripRealign(
-  target: Target,
-  options?: StripRealignOptions
-): AnimationHandle {
+export function stripRealign(target: Target, options?: StripRealignOptions): AnimationHandle {
   const element = resolveElement(target);
-  if (!element || prefersReducedMotion()) {
-    return createDummyHandle();
-  }
+  if (!element || prefersReducedMotion()) return createDummyHandle();
 
   const {
     strips = 4,
     maxOffset = 35,
     duration = 650,
+    revertOnFinish = true,
   } = options || {};
 
   const originalHTML = element.innerHTML;
   const originalAriaLabel = element.getAttribute('aria-label');
   const rawText = element.textContent || '';
 
-  if (!rawText.trim()) {
-    return createDummyHandle();
-  }
+  if (!rawText.trim()) return createDummyHandle();
 
   if (!originalAriaLabel) {
     element.setAttribute('aria-label', rawText.trim());
   }
 
   const computed = window.getComputedStyle(element);
+  const preserveNewlines = ['pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(computed.whiteSpace);
 
-  // Split text by explicit paragraphs/newlines first, then detect soft wraps
-  const rawParagraphs = rawText.split(/\r?\n/).map((p) => p.trim()).filter(Boolean);
+  let processedText = rawText;
+  if (!preserveNewlines) {
+    processedText = processedText.replace(/\s+/g, ' ').trim();
+  }
+  
+  const rawParagraphs = preserveNewlines ? processedText.split('\n') : [processedText];
   const lines: string[] = [];
 
   rawParagraphs.forEach((paragraphText) => {
@@ -111,9 +101,7 @@ export function stripRealign(
     });
 
     lineWordGroups.forEach((group) => {
-      if (group.length > 0) {
-        lines.push(group.join(' '));
-      }
+      if (group.length > 0) lines.push(group.join(' '));
     });
   });
 
@@ -122,7 +110,6 @@ export function stripRealign(
     return createDummyHandle();
   }
 
-  // Measure exact pixel dimensions for each individual line
   const measureSpan = document.createElement('span');
   measureSpan.style.position = 'absolute';
   measureSpan.style.visibility = 'hidden';
@@ -141,10 +128,9 @@ export function stripRealign(
   const lineMetrics = lines.map((lineText) => {
     measureSpan.textContent = lineText;
     const r = measureSpan.getBoundingClientRect();
-    const height =
-      !isNaN(parsedLineHeight) && parsedLineHeight > 0
-        ? Math.ceil(parsedLineHeight)
-        : Math.ceil(r.height || 36);
+    const height = !isNaN(parsedLineHeight) && parsedLineHeight > 0
+      ? Math.ceil(parsedLineHeight)
+      : Math.ceil(r.height || 36);
     return {
       text: lineText,
       width: Math.ceil(r.width) || element.offsetWidth || 300,
@@ -153,61 +139,53 @@ export function stripRealign(
   });
   element.removeChild(measureSpan);
 
-  const originalStyle = {
-    position: element.style.position,
-    display: element.style.display,
-    flexDirection: element.style.flexDirection,
-    alignItems: element.style.alignItems,
-    overflow: element.style.overflow,
-  };
-
   element.textContent = '';
-  element.style.position = 'relative';
-  element.style.display = 'flex';
-  element.style.flexDirection = 'column';
-  element.style.overflow = 'hidden';
-  element.style.alignItems =
-    computed.textAlign === 'center'
-      ? 'center'
-      : computed.textAlign === 'right'
-      ? 'flex-end'
-      : 'flex-start';
+  
+  const innerWrapper = document.createElement('div');
+  innerWrapper.className = 'wim-strip-wrapper';
+  innerWrapper.style.position = 'relative';
+  innerWrapper.style.display = 'flex';
+  innerWrapper.style.flexDirection = 'column';
+  innerWrapper.style.overflow = 'hidden';
+  innerWrapper.style.alignItems = computed.textAlign === 'center' ? 'center' : computed.textAlign === 'right' ? 'flex-end' : 'flex-start';
+  element.appendChild(innerWrapper);
 
-  const animations: Animation[] = [];
+  const animations = new Set<Animation>();
+  
+  const paddingPx = parseFloat(computed.fontSize) * 0.3 || 5;
 
   lineMetrics.forEach(({ text: lineText, width: lineW, height: lineH }) => {
-    // Clipping display box for each line: strips exiting this box are not visible
     const lineContainer = document.createElement('div');
     lineContainer.style.position = 'relative';
     lineContainer.style.width = `${lineW}px`;
     lineContainer.style.height = `${lineH}px`;
-    lineContainer.style.overflow = 'hidden';
+    lineContainer.style.overflow = 'visible'; // allow strips to overflow if we need to? wait, no. The prompt:
+    // Expand the first strip's top boundary by 0.3em upward. Expand the last strip's bottom boundary by 0.3em downward.
     lineContainer.style.whiteSpace = 'nowrap';
     lineContainer.style.boxSizing = 'border-box';
-    element.appendChild(lineContainer);
-
-    const stripTops: number[] = [];
-    const stripHeights: number[] = [];
-    for (let i = 0; i < strips; i++) {
-      const top = Math.round((i * lineH) / strips);
-      const bottom = Math.round(((i + 1) * lineH) / strips);
-      stripTops.push(top);
-      stripHeights.push(Math.max(1, bottom - top));
-    }
+    innerWrapper.appendChild(lineContainer);
 
     for (let i = 0; i < strips; i++) {
+      let top = Math.round((i * lineH) / strips);
+      let bottom = Math.round(((i + 1) * lineH) / strips);
+      
+      if (i === 0) top -= paddingPx;
+      if (i === strips - 1) bottom += paddingPx;
+      
+      const stripHeight = Math.max(1, bottom - top);
+
       const stripWrapper = document.createElement('div');
       stripWrapper.style.position = 'absolute';
-      stripWrapper.style.top = `${stripTops[i]}px`;
+      stripWrapper.style.top = `${top}px`;
       stripWrapper.style.left = '0';
       stripWrapper.style.width = `${lineW}px`;
-      stripWrapper.style.height = `${stripHeights[i]}px`;
+      stripWrapper.style.height = `${stripHeight}px`;
       stripWrapper.style.overflow = 'hidden';
       stripWrapper.setAttribute('aria-hidden', 'true');
 
       const innerContent = document.createElement('div');
       innerContent.style.position = 'absolute';
-      innerContent.style.top = `-${stripTops[i]}px`;
+      innerContent.style.top = `-${top}px`;
       innerContent.style.left = '0';
       innerContent.style.width = `${lineW}px`;
       innerContent.style.height = `${lineH}px`;
@@ -225,7 +203,6 @@ export function stripRealign(
       stripWrapper.appendChild(innerContent);
       lineContainer.appendChild(stripWrapper);
 
-      // Randomized puzzle keyframes and time intervals per strip
       const keyframes = generatePuzzleIntroKeyframes(maxOffset);
       const stripDelay = Math.random() * 120;
       const stripDuration = duration * (0.8 + Math.random() * 0.4);
@@ -237,33 +214,39 @@ export function stripRealign(
           easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
           fill: 'forwards',
         });
-        animations.push(anim);
+        animations.add(anim);
+        anim.onfinish = () => animations.delete(anim);
       }
     }
   });
 
   const revert = () => {
     element.innerHTML = originalHTML;
-    element.style.position = originalStyle.position;
-    element.style.display = originalStyle.display;
-    element.style.flexDirection = originalStyle.flexDirection;
-    element.style.alignItems = originalStyle.alignItems;
-    element.style.overflow = originalStyle.overflow;
-    if (originalAriaLabel === null) {
-      element.removeAttribute('aria-label');
-    } else {
-      element.setAttribute('aria-label', originalAriaLabel);
-    }
+    if (originalAriaLabel === null) element.removeAttribute('aria-label');
+    else element.setAttribute('aria-label', originalAriaLabel);
   };
 
-  const finished = Promise.all(animations.map((a) => a.finished)).then(() => {
-    revert();
-  });
+  let isCanceled = false;
+  let resolveFinished!: () => void;
+  const finished = new Promise<void>((res) => { resolveFinished = res; });
 
   const cancel = () => {
+    isCanceled = true;
     animations.forEach((a) => a.cancel());
     revert();
+    unregisterIntro(element);
+    resolveFinished();
   };
+
+  registerIntro(element, { cancel });
+
+  Promise.all(Array.from(animations).map(a => a.finished)).then(() => {
+    if (!isCanceled) {
+      if (revertOnFinish) revert();
+      unregisterIntro(element);
+      resolveFinished();
+    }
+  }).catch(() => {});
 
   return { finished, cancel };
 }

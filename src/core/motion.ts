@@ -37,3 +37,17 @@ export function createDummyHandle(): AnimationHandle {
     cancel: () => {},
   };
 }
+
+const activeIntros = new WeakMap<HTMLElement, { cancel: () => void }>();
+
+export function registerIntro(element: HTMLElement, handle: { cancel: () => void }): void {
+  const existing = activeIntros.get(element);
+  if (existing) {
+    existing.cancel();
+  }
+  activeIntros.set(element, handle);
+}
+
+export function unregisterIntro(element: HTMLElement): void {
+  activeIntros.delete(element);
+}

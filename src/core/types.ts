@@ -62,6 +62,12 @@ export interface BaseOptions {
   easing?: string;
   /** Delay step between staggered elements (chars/words) in milliseconds. */
   stagger?: number;
+  /**
+   * When true (default), restores the target's original innerHTML and aria-label
+   * after the animation completes naturally. When false, the final visual state persists.
+   * @default true
+   */
+  revertOnFinish?: boolean;
 }
 
 /**
