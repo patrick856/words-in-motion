@@ -51,6 +51,24 @@ function segmentGraphemes(text: string): string[] {
 }
 
 /**
+ * Creates a layout-preserving space between generated word spans.
+ *
+ * A whitespace-only text node is ignored when the split target is a flex
+ * container, which makes adjacent words appear to run together. An explicit
+ * inline-block remains a flex item while `white-space: pre` preserves its
+ * width in normal inline layout too.
+ */
+function createSpace(): HTMLSpanElement {
+  const space = document.createElement('span');
+  space.classList.add('wim-space');
+  space.style.display = 'inline-block';
+  space.style.whiteSpace = 'pre';
+  space.setAttribute('aria-hidden', 'true');
+  space.textContent = ' ';
+  return space;
+}
+
+/**
  * Splits an element's text into word-level <span> elements.
  * Preserves accessibility via aria-label on the container and aria-hidden on generated spans.
  */
@@ -91,7 +109,7 @@ export function splitWords(target: Target): SplitWordsResult {
       words.push(wordSpan);
 
       if (wordIndex < wordTokens.length - 1) {
-        element.appendChild(document.createTextNode(' '));
+        element.appendChild(createSpace());
       }
     });
 
@@ -169,7 +187,7 @@ export function splitChars(target: Target): SplitCharsResult {
       element.appendChild(wordSpan);
 
       if (wordIndex < wordTokens.length - 1) {
-        element.appendChild(document.createTextNode(' '));
+        element.appendChild(createSpace());
       }
     });
 

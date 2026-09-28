@@ -1,5 +1,6 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
 import { prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro, normalizeDuration, runAnimationWithTrigger } from '../core/motion';
+import { splitWords } from '../core/split';
 
 export interface StripRealignOptions extends BaseOptions {
   /**
@@ -12,36 +13,70 @@ export interface StripRealignOptions extends BaseOptions {
   strips?: number;
   /** Maximum horizontal displacement in pixels. Defaults to 35. */
   maxOffset?: number;
+  /** Slice complete rendered lines or each word independently. Defaults to 'lines'. */
+  by?: 'lines' | 'words';
 }
 
 const DEFAULT_DURATION = 1400;
 const DEFAULT_MAX_DELAY = 120;
 
 function generatePuzzleIntroKeyframes(maxOffset: number): Keyframe[] {
-  const sign = Math.random() < 0.5 ? -1 : 1;
-  const initialDist = Math.round(sign * (0.8 + Math.random() * 0.45) * maxOffset);
-
-  const t1 = 0.18 + Math.random() * 0.08;
-  const t1Hold = t1 + 0.06 + Math.random() * 0.05;
-  const t2 = t1Hold + 0.18 + Math.random() * 0.08;
-  const t2Hold = Math.min(0.72, t2 + 0.06 + Math.random() * 0.05);
-  const t3 = t2Hold + 0.12 + Math.random() * 0.06;
-  const tSolve = Math.min(0.95, t3 + 0.08 + Math.random() * 0.06);
-
-  const pos1 = Math.round(-initialDist * (0.45 + Math.random() * 0.25));
-  const pos2 = Math.round(initialDist * (0.18 + Math.random() * 0.18));
-  const pos3 = Math.round(-initialDist * (0.05 + Math.random() * 0.08));
+  const randomPoint = (scale = 1) => {
+    const x = Math.round((Math.random() * 2 - 1) * maxOffset * scale);
+    const y = Math.round((Math.random() * 2 - 1) * maxOffset * 0.2 * scale);
+    return `translate3d(${x}px, ${y}px, 0)`;
+  };
+  const initial = randomPoint(0.85 + Math.random() * 0.45);
+  const stopOne = randomPoint(0.4 + Math.random() * 0.45);
+  const stopTwo = randomPoint(0.18 + Math.random() * 0.35);
+  const nearHome = randomPoint(0.05 + Math.random() * 0.12);
+  const t1 = 0.14 + Math.random() * 0.12;
+  const t1Hold = t1 + 0.05 + Math.random() * 0.08;
+  const t2 = t1Hold + 0.15 + Math.random() * 0.14;
+  const t2Hold = Math.min(0.7, t2 + 0.05 + Math.random() * 0.1);
+  const t3 = Math.min(0.82, t2Hold + 0.1 + Math.random() * 0.1);
+  const tSolve = Math.min(0.95, t3 + 0.08 + Math.random() * 0.08);
 
   return [
-    { transform: `translate3d(${initialDist}px, 0, 0)`, opacity: 0.75, offset: 0 },
-    { transform: `translate3d(${pos1}px, 0, 0)`, opacity: 0.88, offset: Number(t1.toFixed(3)) },
-    { transform: `translate3d(${pos1}px, 0, 0)`, opacity: 0.88, offset: Number(t1Hold.toFixed(3)) },
-    { transform: `translate3d(${pos2}px, 0, 0)`, opacity: 0.95, offset: Number(t2.toFixed(3)) },
-    { transform: `translate3d(${pos2}px, 0, 0)`, opacity: 0.95, offset: Number(t2Hold.toFixed(3)) },
-    { transform: `translate3d(${pos3}px, 0, 0)`, opacity: 1, offset: Number(t3.toFixed(3)) },
+    { transform: initial, opacity: 1, offset: 0 },
+    { transform: stopOne, opacity: 1, offset: Number(t1.toFixed(3)) },
+    { transform: stopOne, opacity: 1, offset: Number(t1Hold.toFixed(3)) },
+    { transform: stopTwo, opacity: 1, offset: Number(t2.toFixed(3)) },
+    { transform: stopTwo, opacity: 1, offset: Number(t2Hold.toFixed(3)) },
+    { transform: nearHome, opacity: 1, offset: Number(t3.toFixed(3)) },
     { transform: 'translate3d(0, 0, 0)', opacity: 1, offset: Number(tSolve.toFixed(3)) },
     { transform: 'translate3d(0, 0, 0)', opacity: 1, offset: 1 },
   ];
+}
+
+function createStripHandle(
+  element: HTMLElement,
+  animations: Set<Animation>,
+  revert: () => void,
+  revertOnFinish: boolean
+): AnimationHandle {
+  let isCanceled = false;
+  let resolveFinished!: () => void;
+  const finished = new Promise<void>((res) => { resolveFinished = res; });
+
+  const cancel = () => {
+    isCanceled = true;
+    animations.forEach((animation) => animation.cancel());
+    revert();
+    unregisterIntro(element);
+    resolveFinished();
+  };
+
+  registerIntro(element, { cancel });
+  Promise.all(Array.from(animations).map((animation) => animation.finished)).then(() => {
+    if (!isCanceled) {
+      if (revertOnFinish) revert();
+      unregisterIntro(element);
+      resolveFinished();
+    }
+  }).catch(() => {});
+
+  return { finished, cancel };
 }
 
 function runSingleStripRealign(element: HTMLElement, options?: StripRealignOptions): AnimationHandle {
@@ -54,6 +89,7 @@ function runSingleStripRealign(element: HTMLElement, options?: StripRealignOptio
   const {
     strips = 4,
     maxOffset = 35,
+    by = 'lines',
     revertOnFinish = true,
   } = options || {};
 
@@ -63,11 +99,61 @@ function runSingleStripRealign(element: HTMLElement, options?: StripRealignOptio
 
   if (!rawText.trim()) return createDummyHandle();
 
+  const computed = window.getComputedStyle(element);
+
+  if (by === 'words') {
+    const splitResult = splitWords(element);
+    const animations = new Set<Animation>();
+
+    splitResult.words.forEach((word) => {
+      const text = word.textContent || '';
+      const rect = word.getBoundingClientRect();
+      const wordWidth = Math.ceil(rect.width || word.offsetWidth || Math.max(8, text.length * 10));
+      const wordHeight = Math.ceil(rect.height || word.offsetHeight || parseFloat(computed.lineHeight) || 36);
+      word.style.position = 'relative';
+      word.style.width = `${wordWidth}px`;
+      word.style.height = `${wordHeight}px`;
+      word.style.overflow = 'hidden';
+      word.textContent = '';
+
+      for (let index = 0; index < strips; index++) {
+        const top = Math.round((index * wordHeight) / strips);
+        const bottom = wordHeight - Math.round(((index + 1) * wordHeight) / strips);
+        const strip = document.createElement('span');
+        strip.style.position = 'absolute';
+        strip.style.inset = '0';
+        strip.style.clipPath = `inset(${top}px 0px ${bottom}px 0px)`;
+        strip.setAttribute('aria-hidden', 'true');
+
+        const content = document.createElement('span');
+        content.style.position = 'absolute';
+        content.style.inset = '0';
+        content.style.whiteSpace = 'nowrap';
+        content.style.lineHeight = `${wordHeight}px`;
+        content.textContent = text;
+        strip.appendChild(content);
+        word.appendChild(strip);
+
+        if (typeof strip.animate === 'function') {
+          const animation = strip.animate(generatePuzzleIntroKeyframes(maxOffset), {
+            duration: duration * (0.55 + Math.random() * 0.8),
+            delay: Math.random() * actualMaxDelay,
+            easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+            fill: 'forwards',
+          });
+          animations.add(animation);
+          animation.onfinish = () => animations.delete(animation);
+        }
+      }
+    });
+
+    return createStripHandle(element, animations, splitResult.revert, revertOnFinish);
+  }
+
   if (!originalAriaLabel) {
     element.setAttribute('aria-label', rawText.trim());
   }
 
-  const computed = window.getComputedStyle(element);
   const preserveNewlines = ['pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(computed.whiteSpace);
 
   let processedText = rawText;
@@ -243,7 +329,7 @@ function runSingleStripRealign(element: HTMLElement, options?: StripRealignOptio
 
       const keyframes = generatePuzzleIntroKeyframes(maxOffset);
       const stripDelay = Math.random() * actualMaxDelay;
-      const stripDuration = duration * (0.8 + Math.random() * 0.4);
+      const stripDuration = duration * (0.55 + Math.random() * 0.8);
 
       if (typeof stripWrapper.animate === 'function') {
         const anim = stripWrapper.animate(keyframes, {
@@ -264,34 +350,12 @@ function runSingleStripRealign(element: HTMLElement, options?: StripRealignOptio
     else element.setAttribute('aria-label', originalAriaLabel);
   };
 
-  let isCanceled = false;
-  let resolveFinished!: () => void;
-  const finished = new Promise<void>((res) => { resolveFinished = res; });
-
-  const cancel = () => {
-    isCanceled = true;
-    animations.forEach((a) => a.cancel());
-    revert();
-    unregisterIntro(element);
-    resolveFinished();
-  };
-
-  registerIntro(element, { cancel });
-
-  Promise.all(Array.from(animations).map(a => a.finished)).then(() => {
-    if (!isCanceled) {
-      if (revertOnFinish) revert();
-      unregisterIntro(element);
-      resolveFinished();
-    }
-  }).catch(() => {});
-
-  return { finished, cancel };
+  return createStripHandle(element, animations, revert, revertOnFinish);
 }
 
 /**
  * Strip realign intro animation.
- * Slices each line of text into horizontal puzzle strips enclosed in display boxes
+ * Slices complete lines or individual words into horizontal puzzle strips enclosed in display boxes
  * so when any strip slides out past the boundary it is clipped and hidden.
  * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
  */

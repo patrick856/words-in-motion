@@ -2,10 +2,35 @@ import { registry } from './registry';
 import './style.css';
 
 const SHORT_SAMPLE_TEXT = 'Words in Motion';
-const MULTILINE_SAMPLE_TEXT =
-  'Typographic motion for the web. Interactive cursor-reactive text effects that respond seamlessly as you move across the screen.';
-const SCROLL_SAMPLE_TEXT =
-  'Scroll-driven typographic motion for the web.\nText progress accelerates as you scroll through the viewport.\nSmooth scrub or triggered viewport animations.';
+const PARAGRAPH_SAMPLE_TEXT =
+  'Words move differently when a sentence has room to breathe. This paragraph is long enough to wrap across several lines, so you can see how each effect handles spacing, rhythm, and the flow of real reading.';
+
+type PlaygroundHandle = {
+  cancel?: () => void;
+  destroy?: () => void;
+  pause?: () => void;
+  resume?: () => void;
+};
+
+let paragraphMode = false;
+const activeHandles = new Set<PlaygroundHandle>();
+
+function sampleText(): string {
+  return paragraphMode ? PARAGRAPH_SAMPLE_TEXT : SHORT_SAMPLE_TEXT;
+}
+
+function setStageText(stage: HTMLElement): void {
+  stage.textContent = sampleText();
+  stage.classList.toggle('paragraph-stage', paragraphMode);
+}
+
+function disposeActiveHandles(): void {
+  activeHandles.forEach((handle) => {
+    if (typeof handle.destroy === 'function') handle.destroy();
+    else if (typeof handle.cancel === 'function') handle.cancel();
+  });
+  activeHandles.clear();
+}
 
 function renderCategorySection(
   containerId: string,
@@ -61,12 +86,7 @@ function renderCategorySection(
     const controls = document.createElement('div');
     controls.className = 'card-controls';
 
-    let activeHandle: {
-      cancel?: () => void;
-      destroy?: () => void;
-      pause?: () => void;
-      resume?: () => void;
-    } | void;
+    let activeHandle: PlaygroundHandle | void;
 
     if (categoryKey === 'scroll') {
       const resetBtn = document.createElement('button');
@@ -81,7 +101,7 @@ function renderCategorySection(
 
       const stage = document.createElement('div');
       stage.className = 'stage multiline-stage';
-      stage.textContent = SCROLL_SAMPLE_TEXT;
+      setStageText(stage);
 
       const spacerBottom = document.createElement('div');
       spacerBottom.className = 'scroll-spacer';
@@ -94,10 +114,12 @@ function renderCategorySection(
       const runScrollEffect = () => {
         if (activeHandle && typeof activeHandle.destroy === 'function') {
           activeHandle.destroy();
+          activeHandles.delete(activeHandle);
         }
         scrollContainer.scrollTop = 0;
-        stage.textContent = SCROLL_SAMPLE_TEXT;
+        setStageText(stage);
         activeHandle = entry.run(stage);
+        if (activeHandle) activeHandles.add(activeHandle);
       };
 
       resetBtn.addEventListener('click', runScrollEffect);
@@ -116,11 +138,12 @@ function renderCategorySection(
 
       const stage = document.createElement('div');
       stage.className = 'stage multiline-stage';
-      stage.textContent = MULTILINE_SAMPLE_TEXT;
+      setStageText(stage);
 
       const runEffect = () => {
-        stage.textContent = MULTILINE_SAMPLE_TEXT;
+        setStageText(stage);
         activeHandle = entry.run(stage);
+        if (activeHandle) activeHandles.add(activeHandle);
         isDestroyed = false;
         toggleBtn.textContent = 'Destroy';
       };
@@ -129,6 +152,7 @@ function renderCategorySection(
         if (!isDestroyed) {
           if (activeHandle && typeof activeHandle.destroy === 'function') {
             activeHandle.destroy();
+            activeHandles.delete(activeHandle);
           }
           isDestroyed = true;
           toggleBtn.textContent = 'Recreate';
@@ -151,14 +175,16 @@ function renderCategorySection(
 
       const stage = document.createElement('div');
       stage.className = 'stage';
-      stage.textContent = SHORT_SAMPLE_TEXT;
+      setStageText(stage);
 
       const runAnimation = () => {
         if (activeHandle && typeof activeHandle.cancel === 'function') {
           activeHandle.cancel();
+          activeHandles.delete(activeHandle);
         }
-        stage.textContent = SHORT_SAMPLE_TEXT;
+        setStageText(stage);
         activeHandle = entry.run(stage);
+        if (activeHandle) activeHandles.add(activeHandle);
       };
 
       replayBtn.addEventListener('click', runAnimation);
@@ -170,6 +196,7 @@ function renderCategorySection(
         stopBtn.addEventListener('click', () => {
           if (activeHandle && typeof activeHandle.cancel === 'function') {
             activeHandle.cancel();
+            activeHandles.delete(activeHandle);
           }
         });
         controls.appendChild(stopBtn);
@@ -189,6 +216,7 @@ function renderCategorySection(
 }
 
 function initPlayground() {
+  disposeActiveHandles();
   renderCategorySection('intro-section', 'Intro Animations', 'intro');
   renderCategorySection('loop-section', 'Loop Animations', 'loop');
   renderCategorySection('outro-section', 'Outro Animations', 'outro');
@@ -196,8 +224,28 @@ function initPlayground() {
   renderCategorySection('scroll-section', 'Scroll Animations', 'scroll');
 }
 
+function initSampleModeControls() {
+  const shortButton = document.getElementById('short-mode');
+  const paragraphButton = document.getElementById('paragraph-mode');
+  if (!shortButton || !paragraphButton) return;
+
+  const updateMode = (useParagraph: boolean) => {
+    paragraphMode = useParagraph;
+    shortButton.setAttribute('aria-pressed', String(!useParagraph));
+    paragraphButton.setAttribute('aria-pressed', String(useParagraph));
+    initPlayground();
+  };
+
+  shortButton.addEventListener('click', () => updateMode(false));
+  paragraphButton.addEventListener('click', () => updateMode(true));
+}
+
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initPlayground);
+  document.addEventListener('DOMContentLoaded', () => {
+    initSampleModeControls();
+    initPlayground();
+  });
 } else {
+  initSampleModeControls();
   initPlayground();
 }

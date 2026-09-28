@@ -26,6 +26,14 @@ describe('Text Splitter (core/split.ts)', () => {
       });
 
       expect(container.getAttribute('aria-label')).toBe('Words in motion');
+      const spaces = container.querySelectorAll<HTMLElement>('.wim-space');
+      expect(spaces).toHaveLength(2);
+      spaces.forEach((space) => {
+        expect(space.textContent).toBe(' ');
+        expect(space.style.display).toBe('inline-block');
+        expect(space.style.whiteSpace).toBe('pre');
+        expect(space.getAttribute('aria-hidden')).toBe('true');
+      });
 
       revert();
       expect(container.innerHTML).toBe('Words in motion');
@@ -57,6 +65,7 @@ describe('Text Splitter (core/split.ts)', () => {
       });
 
       expect(container.getAttribute('aria-label')).toBe('Fast motion');
+      expect(container.querySelectorAll('.wim-space')).toHaveLength(1);
 
       revert();
       expect(container.innerHTML).toBe('Fast motion');

@@ -9,24 +9,78 @@ export interface DirectionalRevealOptions extends BaseOptions {
    * @default 900
    */
   duration?: number;
-  /** Reveal direction ordering across elements. Defaults to 'left-to-right'. */
+  /** @deprecated Reveal order is intentionally irregular. */
   direction?: 'left-to-right' | 'right-to-left' | 'center-out' | 'edges-in';
   /** Split granularity. Defaults to 'chars'. */
   by?: 'chars' | 'words';
-  /** Whether elements drop in vertically from above as they reveal. Defaults to false. */
+  /** @deprecated Letters now choose a random incoming direction. */
   dropIn?: boolean;
-  /** Vertical drop-in distance in pixels when dropIn is true. Defaults to 20. */
+  /** @deprecated Letters now choose a random incoming direction. */
   dropDistance?: number;
-  /** Style of drop reveal when dropIn is true. Defaults to 'settle-on-next'. */
+  /** @deprecated Letters now choose a random incoming direction. */
   dropStyle?: 'settle-on-next' | 'simple';
-  /** Settle duration for 'settle-on-next' mode. Defaults to 260. */
+  /** @deprecated Letters settle directly in their final position. */
   settleDuration?: number;
 }
 
 const DEFAULT_DURATION = 900;
 const DEFAULT_STAGGER = 40;
-const DEFAULT_SETTLE_DURATION = 260;
-const DEFAULT_APPEAR_DURATION = 150;
+const JUMP_AHEAD_CHANCE = 0.2;
+const RANDOM_REVEAL_CHANCE = 0.06;
+
+function createRevealOrder(count: number): number[] {
+  const unrevealed = new Set(Array.from({ length: count }, (_, index) => index));
+  const order: number[] = [];
+  let nextSequential = 0;
+
+  while (unrevealed.size > 0) {
+    while (!unrevealed.has(nextSequential) && nextSequential < count) nextSequential++;
+    const jumpCandidates = Array.from({ length: 4 }, (_, offset) => nextSequential + 5 + offset)
+      .filter((index) => unrevealed.has(index));
+    const roll = Math.random();
+    let selected = nextSequential;
+
+    if (roll < RANDOM_REVEAL_CHANCE) {
+      const candidates = Array.from(unrevealed);
+      selected = candidates[Math.floor(Math.random() * candidates.length)];
+    } else if (roll < RANDOM_REVEAL_CHANCE + JUMP_AHEAD_CHANCE && jumpCandidates.length > 0) {
+      selected = jumpCandidates[Math.floor(Math.random() * jumpCandidates.length)];
+    }
+
+    unrevealed.delete(selected);
+    order.push(selected);
+    if (selected === nextSequential) nextSequential++;
+  }
+
+  return order;
+}
+
+function createClippedFrames(units: HTMLElement[]): void {
+  units.forEach((unit) => {
+    const rect = unit.getBoundingClientRect();
+    const frame = document.createElement('span');
+    frame.classList.add('wim-directional-frame');
+    frame.style.display = 'inline-block';
+    frame.style.position = 'relative';
+    frame.style.overflow = 'hidden';
+    frame.style.verticalAlign = 'top';
+    if (rect.width > 0) frame.style.width = `${rect.width}px`;
+    if (rect.height > 0) frame.style.height = `${rect.height}px`;
+
+    unit.parentNode?.insertBefore(frame, unit);
+    frame.appendChild(unit);
+    unit.style.display = 'inline-block';
+    unit.style.opacity = '1';
+  });
+}
+
+function randomStartTransform(): string {
+  const direction = Math.floor(Math.random() * 4);
+  if (direction === 0) return 'translate3d(-115%, 0, 0)';
+  if (direction === 1) return 'translate3d(115%, 0, 0)';
+  if (direction === 2) return 'translate3d(0, -115%, 0)';
+  return 'translate3d(0, 115%, 0)';
+}
 
 function runSingleDirectionalReveal(element: HTMLElement, options?: DirectionalRevealOptions): AnimationHandle {
   if (prefersReducedMotion()) return createDummyHandle();
@@ -34,25 +88,12 @@ function runSingleDirectionalReveal(element: HTMLElement, options?: DirectionalR
   const duration = normalizeDuration(options?.duration, DEFAULT_DURATION);
   const timingScale = duration / DEFAULT_DURATION;
 
-  const {
-    direction = 'left-to-right',
-    by = 'chars',
-    dropIn = false,
-    dropDistance = 20,
-    dropStyle = 'settle-on-next',
-    easing = 'cubic-bezier(0.16, 1, 0.3, 1)',
-    revertOnFinish = true,
-  } = options || {};
+  const { by = 'chars', easing = 'cubic-bezier(0.16, 1, 0.3, 1)', revertOnFinish = true } = options || {};
 
   const actualStagger = typeof options?.stagger === 'number'
     ? Math.max(0, options.stagger)
     : Math.max(5, Math.round(DEFAULT_STAGGER * timingScale));
 
-  const actualSettleDuration = typeof options?.settleDuration === 'number'
-    ? Math.max(10, options.settleDuration)
-    : Math.max(20, Math.round(DEFAULT_SETTLE_DURATION * timingScale));
-
-  const actualAppearDuration = Math.max(20, Math.round(DEFAULT_APPEAR_DURATION * timingScale));
   const actualUnitDuration = Math.max(50, Math.round(600 * timingScale));
 
   const splitResult = by === 'words' ? splitWords(element) : splitChars(element);
@@ -65,7 +106,6 @@ function runSingleDirectionalReveal(element: HTMLElement, options?: DirectionalR
   const count = units.length;
   let isCanceled = false;
   const animations = new Set<Animation>();
-  const timeouts = new Set<ReturnType<typeof setTimeout>>();
 
   let resolveFinished!: () => void;
   const finished = new Promise<void>((res) => { resolveFinished = res; });
@@ -73,7 +113,6 @@ function runSingleDirectionalReveal(element: HTMLElement, options?: DirectionalR
   const cancel = () => {
     isCanceled = true;
     animations.forEach(a => a.cancel());
-    timeouts.forEach(t => clearTimeout(t));
     splitResult.revert();
     unregisterIntro(element);
     resolveFinished();
@@ -82,16 +121,8 @@ function runSingleDirectionalReveal(element: HTMLElement, options?: DirectionalR
   registerIntro(element, { cancel });
 
   let unitsDone = 0;
-  let maxStaggerIndex = 0;
-
-  const staggers = units.map((_, index) => {
-    let staggerIndex = index;
-    if (direction === 'right-to-left') staggerIndex = count - 1 - index;
-    else if (direction === 'center-out') staggerIndex = Math.abs(index - (count - 1) / 2);
-    else if (direction === 'edges-in') staggerIndex = (count - 1) / 2 - Math.abs(index - (count - 1) / 2);
-    if (staggerIndex > maxStaggerIndex) maxStaggerIndex = staggerIndex;
-    return staggerIndex;
-  });
+  const revealOrder = createRevealOrder(count);
+  createClippedFrames(units);
 
   const onUnitDone = () => {
     unitsDone++;
@@ -104,77 +135,26 @@ function runSingleDirectionalReveal(element: HTMLElement, options?: DirectionalR
     }
   };
 
-  units.forEach((unit: HTMLElement, i: number) => {
-    const staggerIndex = staggers[i];
-    let hOffset = 0;
-    if (direction === 'left-to-right') hOffset = -15;
-    else if (direction === 'right-to-left') hOffset = 15;
-
-    unit.style.opacity = '0';
+  revealOrder.forEach((unitIndex, revealIndex) => {
+    const unit = units[unitIndex];
+    const overlapJitter = revealIndex === 0 ? 0 : Math.random() * actualStagger * 1.5;
+    const delay = revealIndex * actualStagger * 0.6 + overlapJitter;
 
     if (typeof unit.animate === 'function') {
-      if (dropIn && dropStyle === 'settle-on-next') {
-        const startTransform = `translate3d(${hOffset}px, -${dropDistance}px, 0)`;
-        const midTransform = `translate3d(0, -${dropDistance}px, 0)`;
-        const finalTransform = `translate3d(0, 0, 0)`;
-        
-        const delay = Math.max(0, staggerIndex * actualStagger);
-        
-        const t1 = setTimeout(() => {
-          if (isCanceled) return;
-          unit.style.opacity = '1';
-          const a1 = unit.animate(
-            [
-              { opacity: 0, transform: startTransform },
-              { opacity: 1, transform: midTransform }
-            ],
-            { duration: actualAppearDuration, easing, fill: 'forwards' }
-          );
-          animations.add(a1);
-          a1.onfinish = () => animations.delete(a1);
-        }, delay);
-        timeouts.add(t1);
-
-        const settleDelay = Math.max(0, (staggerIndex + 1) * actualStagger);
-        const t2 = setTimeout(() => {
-          if (isCanceled) return;
-          const a2 = unit.animate(
-            [
-              { transform: midTransform },
-              { transform: finalTransform }
-            ],
-            { duration: actualSettleDuration, easing, fill: 'forwards' }
-          );
-          animations.add(a2);
-          a2.onfinish = () => {
-            animations.delete(a2);
-            onUnitDone();
-          };
-        }, settleDelay);
-        timeouts.add(t2);
-
-      } else {
-        const dropY = dropIn ? -dropDistance : 0;
-        let startTransform = 'none';
-        if (hOffset !== 0 || dropY !== 0) {
-          startTransform = `translate3d(${hOffset}px, ${dropY}px, 0)`;
-        }
-
-        const anim = unit.animate(
-          [
-            { opacity: 0, transform: startTransform },
-            { opacity: 1, transform: 'translate3d(0, 0, 0)' }
-          ],
-          { duration: actualUnitDuration, delay: Math.max(0, staggerIndex * actualStagger), easing, fill: 'forwards' }
-        );
-        animations.add(anim);
-        anim.onfinish = () => {
-          animations.delete(anim);
-          onUnitDone();
-        };
-      }
+      const anim = unit.animate(
+        [
+          { transform: randomStartTransform() },
+          { transform: 'translate3d(0, 0, 0)' },
+        ],
+        { duration: actualUnitDuration, delay, easing, fill: 'both' }
+      );
+      animations.add(anim);
+      anim.onfinish = () => {
+        animations.delete(anim);
+        onUnitDone();
+      };
     } else {
-      unit.style.opacity = '1';
+      unit.style.transform = 'translate3d(0, 0, 0)';
       onUnitDone();
     }
   });
@@ -184,7 +164,7 @@ function runSingleDirectionalReveal(element: HTMLElement, options?: DirectionalR
 
 /**
  * Directional reveal intro animation.
- * Reveals text word-by-word or char-by-char sliding in directionally or dropping from above.
+ * Reveals text through clipped character frames from randomized directions and an overlapping, imperfect order.
  * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
  */
 export function directionalReveal(target: Target, options?: DirectionalRevealOptions): AnimationHandle {

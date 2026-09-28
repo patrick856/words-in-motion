@@ -13,8 +13,8 @@ export interface RiseOptions extends BaseOptions {
   from?: 'ground' | 'ceiling';
   /** Distance in pixels for initial offset when not masked. Defaults to 30. */
   distance?: number;
-  /** Split granularity. Defaults to 'words'. */
-  by?: 'words' | 'chars';
+  /** Split granularity. Defaults to 'lines'. */
+  by?: 'lines' | 'words' | 'chars';
   /** Whether to clip the animation within a bounding box. Defaults to true. */
   mask?: boolean;
   /** Whether to fade opacity during reveal. Defaults to true when unmasked, false when masked. */
@@ -23,6 +23,79 @@ export interface RiseOptions extends BaseOptions {
 
 const DEFAULT_DURATION = 800;
 const DEFAULT_STAGGER = 30;
+
+function hasBreakBetween(previous: HTMLElement, current: HTMLElement): boolean {
+  let node: Node | null = previous.nextSibling;
+  while (node && node !== current) {
+    if (node.nodeName === 'BR') return true;
+    node = node.nextSibling;
+  }
+  return false;
+}
+
+function groupWordsByLine(words: HTMLElement[]): HTMLElement[][] {
+  if (words.length === 0) return [];
+
+  const lines: HTMLElement[][] = [[words[0]]];
+  let lineTop = words[0].getBoundingClientRect().top || words[0].offsetTop;
+
+  for (let index = 1; index < words.length; index++) {
+    const word = words[index];
+    const top = word.getBoundingClientRect().top || word.offsetTop;
+    const previous = words[index - 1];
+    const lineHeight = word.getBoundingClientRect().height || word.offsetHeight || 16;
+    const isNewLine = hasBreakBetween(previous, word) || top > lineTop + Math.max(4, lineHeight * 0.4);
+
+    if (isNewLine) {
+      lines.push([word]);
+      lineTop = top;
+    } else {
+      lines[lines.length - 1].push(word);
+    }
+  }
+
+  return lines;
+}
+
+function createLineMasks(element: HTMLElement, words: HTMLElement[]): HTMLElement[] {
+  const lines = groupWordsByLine(words);
+  if (lines.length === 0) return [];
+
+  const fragment = document.createDocumentFragment();
+  const lineContents: HTMLElement[] = [];
+
+  lines.forEach((lineWords) => {
+    const firstWord = lineWords[0];
+    const rect = firstWord.getBoundingClientRect();
+    const lineHeight = Math.ceil(rect.height || firstWord.offsetHeight || 24);
+    const mask = document.createElement('span');
+    const content = document.createElement('span');
+
+    mask.classList.add('wim-line-mask');
+    mask.style.display = 'block';
+    mask.style.position = 'relative';
+    mask.style.height = `${lineHeight}px`;
+    mask.style.overflow = 'hidden';
+    content.classList.add('wim-line');
+    content.style.display = 'inline-block';
+    content.style.whiteSpace = 'nowrap';
+
+    lineWords.forEach((word) => {
+      const space = word.nextSibling instanceof HTMLElement && word.nextSibling.classList.contains('wim-space')
+        ? word.nextSibling
+        : null;
+      content.appendChild(word);
+      if (space) content.appendChild(space);
+    });
+
+    mask.appendChild(content);
+    fragment.appendChild(mask);
+    lineContents.push(content);
+  });
+
+  element.replaceChildren(fragment);
+  return lineContents;
+}
 
 function runSingleRise(element: HTMLElement, options?: RiseOptions): AnimationHandle {
   if (prefersReducedMotion()) return createDummyHandle();
@@ -34,7 +107,7 @@ function runSingleRise(element: HTMLElement, options?: RiseOptions): AnimationHa
     from = 'ground',
     distance = 30,
     easing = 'cubic-bezier(0.16, 1, 0.3, 1)',
-    by = 'words',
+    by = 'lines',
     mask = true,
     revertOnFinish = true,
   } = options || {};
@@ -45,8 +118,12 @@ function runSingleRise(element: HTMLElement, options?: RiseOptions): AnimationHa
 
   const fade = options?.fade ?? (mask ? false : true);
 
-  const splitResult = by === 'words' ? splitWords(element) : splitChars(element);
-  const units: HTMLElement[] = 'words' in splitResult ? splitResult.words : splitResult.chars;
+  const splitResult = by === 'chars' ? splitChars(element) : splitWords(element);
+  let units: HTMLElement[] = 'words' in splitResult ? splitResult.words : splitResult.chars;
+
+  if (by === 'lines') {
+    units = createLineMasks(element, units);
+  }
 
   if (units.length === 0) {
     return createDummyHandle();
@@ -69,15 +146,12 @@ function runSingleRise(element: HTMLElement, options?: RiseOptions): AnimationHa
 
   if (mask) {
     units.forEach((unit: HTMLElement, index: number) => {
-      // wrap in mask
+      // Each unit gets a clipped frame, so its off-position remains invisible
+      // until it enters its final line position.
       const wrapper = document.createElement('div');
       wrapper.style.position = 'relative';
       wrapper.style.display = 'inline-block';
       wrapper.style.overflow = 'hidden';
-      wrapper.style.paddingTop = '0.3em';
-      wrapper.style.marginTop = '-0.3em';
-      wrapper.style.paddingBottom = '0.3em';
-      wrapper.style.marginBottom = '-0.3em';
       wrapper.style.verticalAlign = 'top';
 
       unit.parentNode?.insertBefore(wrapper, unit);

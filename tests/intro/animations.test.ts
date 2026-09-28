@@ -22,6 +22,21 @@ describe('Intro Animations', () => {
     handle.cancel();
   });
 
+  it('directionalReveal uses clipped frames and movement-only character reveals', () => {
+    const animateSpy = vi.spyOn(Element.prototype, 'animate');
+    const handle = directionalReveal(container);
+    const [keyframes, timing] = animateSpy.mock.calls[0] as [Keyframe[], KeyframeAnimationOptions];
+
+    expect(container.querySelectorAll('.wim-directional-frame')).toHaveLength('Words in Motion Intro'.replace(/\s/g, '').length);
+    expect(keyframes[0].opacity).toBeUndefined();
+    expect(keyframes[1].opacity).toBeUndefined();
+    expect(keyframes[0].transform).toMatch(/^translate3d\((?:-115%|115%|0), (?:-115%|115%|0), 0\)$/);
+    expect(timing.fill).toBe('both');
+
+    handle.cancel();
+    animateSpy.mockRestore();
+  });
+
   it('lampFlicker creates animation handle and cancels cleanly', () => {
     const handle = lampFlicker(container, { flickers: 3 });
     expect(handle.finished).toBeInstanceOf(Promise);
@@ -29,11 +44,47 @@ describe('Intro Animations', () => {
     handle.cancel();
   });
 
+  it('lampFlicker uses irregular timing and ends with rapid settling flicks', () => {
+    const animateSpy = vi.spyOn(Element.prototype, 'animate');
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
+
+    const handle = lampFlicker(container, { flickers: 3 });
+    const keyframes = animateSpy.mock.calls[0][0] as Keyframe[];
+    const offsets = keyframes.map((frame) => Number(frame.offset));
+    const gaps = offsets.slice(1).map((offset, index) => offset - offsets[index]);
+
+    expect(offsets[0]).toBe(0);
+    expect(offsets.at(-1)).toBe(1);
+    expect(offsets.every((offset, index) => index === 0 || offset > offsets[index - 1])).toBe(true);
+    expect(new Set(gaps.map((gap) => gap.toFixed(4))).size).toBeGreaterThan(2);
+    expect(offsets.filter((offset) => offset >= 0.84 && offset < 1)).toHaveLength(4);
+
+    handle.cancel();
+    randomSpy.mockRestore();
+    animateSpy.mockRestore();
+  });
+
   it('rise creates animation handle and cancels cleanly', () => {
     const handle = rise(container, { from: 'ceiling' });
     expect(handle.finished).toBeInstanceOf(Promise);
     expect(typeof handle.cancel).toBe('function');
     handle.cancel();
+  });
+
+  it('rise animates explicit text lines together by default', () => {
+    container.style.whiteSpace = 'pre-line';
+    container.textContent = 'First line\nSecond line';
+    const animateSpy = vi.spyOn(Element.prototype, 'animate');
+
+    const handle = rise(container);
+
+    expect(animateSpy).toHaveBeenCalledTimes(2);
+    expect(container.querySelectorAll('.wim-line-mask')).toHaveLength(2);
+    const masks = Array.from(container.querySelectorAll<HTMLElement>('.wim-line-mask'));
+    expect(masks.every((mask) => mask.style.overflow === 'hidden')).toBe(true);
+
+    handle.cancel();
+    animateSpy.mockRestore();
   });
 
   it('chunkedScramble creates animation handle and cancels cleanly', () => {
@@ -140,6 +191,19 @@ describe('Intro Animations', () => {
     expect(container.textContent).toBe('Line One Text\nLine Two Text\nLine Three Text');
   });
 
+  it('stripRealign supports independently animated word strips', () => {
+    container.textContent = 'Words move independently';
+    const animateSpy = vi.spyOn(Element.prototype, 'animate');
+
+    const handle = stripRealign(container, { by: 'words', strips: 2 });
+
+    expect(animateSpy).toHaveBeenCalledTimes(6);
+    expect(container.querySelectorAll('.wim-word')).toHaveLength(3);
+    handle.cancel();
+    expect(container.textContent).toBe('Words move independently');
+    animateSpy.mockRestore();
+  });
+
   describe('Duration scaling and configuration', () => {
     it('directionalReveal scales unit duration and stagger proportionally from duration', () => {
       const animateSpy = vi.spyOn(Element.prototype, 'animate');
@@ -159,7 +223,8 @@ describe('Intro Animations', () => {
       if (calls.length > 1) {
         const secondCallOpt = calls[1][1] as KeyframeAnimationOptions;
         expect(secondCallOpt.duration).toBe(300);
-        expect(secondCallOpt.delay).toBe(20);
+        expect(Number(secondCallOpt.delay)).toBeGreaterThanOrEqual(12);
+        expect(Number(secondCallOpt.delay)).toBeLessThanOrEqual(42);
       }
       handle.cancel();
       animateSpy.mockRestore();
@@ -176,7 +241,8 @@ describe('Intro Animations', () => {
       const calls = animateSpy.mock.calls;
       if (calls.length > 1) {
         const secondCallOpt = calls[1][1] as KeyframeAnimationOptions;
-        expect(secondCallOpt.delay).toBe(15);
+        expect(Number(secondCallOpt.delay)).toBeGreaterThanOrEqual(9);
+        expect(Number(secondCallOpt.delay)).toBeLessThanOrEqual(31.5);
       }
       handle.cancel();
       animateSpy.mockRestore();
@@ -233,13 +299,13 @@ describe('Intro Animations', () => {
         strips: 2,
       });
       // DEFAULT_DURATION = 1400 -> timingScale = 0.5.
-      // stripDuration = 700 * (0.8 .. 1.2), maxDelay = 120 * 0.5 = 60.
+      // Each strip uses a deliberately varied duration: 700 * (0.55 .. 1.35).
       expect(animateSpy).toHaveBeenCalled();
       const calls = animateSpy.mock.calls;
       for (const call of calls) {
         const opt = call[1] as KeyframeAnimationOptions;
-        expect(Number(opt.duration)).toBeGreaterThanOrEqual(700 * 0.79);
-        expect(Number(opt.duration)).toBeLessThanOrEqual(700 * 1.25);
+        expect(Number(opt.duration)).toBeGreaterThanOrEqual(700 * 0.54);
+        expect(Number(opt.duration)).toBeLessThanOrEqual(700 * 1.36);
         expect(Number(opt.delay)).toBeLessThanOrEqual(60);
       }
       handle.cancel();
