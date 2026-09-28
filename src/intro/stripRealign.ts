@@ -152,40 +152,72 @@ export function stripRealign(target: Target, options?: StripRealignOptions): Ani
 
   const animations = new Set<Animation>();
   
-  const paddingPx = parseFloat(computed.fontSize) * 0.3 || 5;
-
   lineMetrics.forEach(({ text: lineText, width: lineW, height: lineH }) => {
+    // lineContainer is the stable bounding box for this logical line.
+    // overflow:hidden here clips horizontal movement during the puzzle animation.
+    // It MUST NOT be 'visible': strips translate left/right and must not bleed into
+    // sibling lines or surrounding content.
     const lineContainer = document.createElement('div');
     lineContainer.style.position = 'relative';
     lineContainer.style.width = `${lineW}px`;
     lineContainer.style.height = `${lineH}px`;
-    lineContainer.style.overflow = 'visible'; // allow strips to overflow if we need to? wait, no. The prompt:
-    // Expand the first strip's top boundary by 0.3em upward. Expand the last strip's bottom boundary by 0.3em downward.
+    lineContainer.style.overflow = 'hidden';
     lineContainer.style.whiteSpace = 'nowrap';
     lineContainer.style.boxSizing = 'border-box';
     innerWrapper.appendChild(lineContainer);
 
-    for (let i = 0; i < strips; i++) {
-      let top = Math.round((i * lineH) / strips);
-      let bottom = Math.round(((i + 1) * lineH) / strips);
-      
-      if (i === 0) top -= paddingPx;
-      if (i === strips - 1) bottom += paddingPx;
-      
-      const stripHeight = Math.max(1, bottom - top);
+    // Derive ALL strip boundaries from one consistent formula so that adjacent
+    // strips always share the same boundary value — no independent per-strip
+    // Math.round calls that could produce overlapping pixel rows.
+    // boundaries[i]   = top of strip i   (px from lineContainer top)
+    // boundaries[i+1] = bottom of strip i (px from lineContainer top)
+    const boundaries: number[] = [];
+    for (let j = 0; j <= strips; j++) {
+      boundaries.push(Math.round((j * lineH) / strips));
+    }
 
+    for (let i = 0; i < strips; i++) {
+      // clip-path inset values encode which vertical band this strip shows:
+      //   topInset    = boundaries[i]         → hide everything above this strip
+      //   bottomInset = lineH - boundaries[i+1] → hide everything below this strip
+      // Because both values come from the same boundaries[] array, adjacent strips
+      // share exactly the same boundary pixel — no gap, no overlap.
+      const topInset = boundaries[i];
+      const bottomInset = lineH - boundaries[i + 1];
+
+      // Every stripWrapper is at the SAME absolute position (top:0, height:lineH)
+      // and contains the SAME full-line text at top:0.  The clip-path is what
+      // makes each one show only its own vertical band.
+      //
+      // ROOT CAUSE of the old ghost strip:
+      //   The previous approach set stripWrapper.top = boundary[i] and
+      //   innerContent.top = -boundary[i], then used overflow:hidden on the
+      //   *animated* stripWrapper to clip the innerContent that extended above it.
+      //   When translate3d is applied to an element, browser compositors may
+      //   evaluate an ancestor overflow:hidden clip against the pre-transform
+      //   layout position, not the painted position.  Strip 1's innerContent
+      //   (laid out at y=0 in the lineContainer) was therefore NOT clipped by
+      //   innerWrapper's overflow:hidden while being animated, so its top 25%
+      //   painted directly on top of strip 0 — producing the ghost duplicate.
+      //   Additionally lineContainer.overflow was 'visible', leaving innerWrapper
+      //   as the only clip, which made the bug worse.
+      //
+      //   With clip-path on the animated element the clip travels with the
+      //   translate3d in local coordinate space — no ambiguity, no ghost.
       const stripWrapper = document.createElement('div');
       stripWrapper.style.position = 'absolute';
-      stripWrapper.style.top = `${top}px`;
+      stripWrapper.style.top = '0';
       stripWrapper.style.left = '0';
       stripWrapper.style.width = `${lineW}px`;
-      stripWrapper.style.height = `${stripHeight}px`;
-      stripWrapper.style.overflow = 'hidden';
+      stripWrapper.style.height = `${lineH}px`;
+      stripWrapper.style.clipPath = `inset(${topInset}px 0px ${bottomInset}px 0px)`;
       stripWrapper.setAttribute('aria-hidden', 'true');
 
+      // innerContent renders the full line at top:0 in the same coordinate system
+      // for every strip.  No offset needed — the clip-path does the slicing.
       const innerContent = document.createElement('div');
       innerContent.style.position = 'absolute';
-      innerContent.style.top = `-${top}px`;
+      innerContent.style.top = '0';
       innerContent.style.left = '0';
       innerContent.style.width = `${lineW}px`;
       innerContent.style.height = `${lineH}px`;

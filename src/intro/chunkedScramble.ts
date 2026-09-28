@@ -23,10 +23,8 @@ export interface ChunkedScrambleOptions extends BaseOptions {
   side?: 'left' | 'right' | 'random';
   /** MS for from-behind slide. Defaults to 260. */
   travelDuration?: number;
-  /** MS between individual letter mutations. Defaults to 45. */
+  /** MS between individual letter mutations during corruption or healing. Defaults to 45. */
   letterStagger?: number;
-  /** MS for initial char reveal. Defaults to 220. */
-  revealDuration?: number;
   /** Optional replacement pool override. */
   decoyChars?: string;
   /** From-behind easing. Defaults to 'cubic-bezier(0.16, 1, 0.3, 1)'. */
@@ -44,7 +42,7 @@ function getDecoy(original: string, pool: string | undefined): string {
   const isUpper = /^[A-Z]$/.test(original);
   const isDigit = /^[0-9]$/.test(original);
   let candidates = pool || DEFAULT_DECOYS;
-  
+
   if (!pool) {
     if (isLower) candidates = 'abcdefghijklmnopqrstuvwxyz';
     else if (isUpper) candidates = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -57,13 +55,21 @@ function getDecoy(original: string, pool: string | undefined): string {
     else if (isDigit) typedCandidates = candidates.replace(/[^0-9]/g, '');
     if (typedCandidates.length > 0) candidates = typedCandidates;
   }
-  
-  candidates = candidates.split('').filter(c => c !== original).join('');
+
+  candidates = candidates.split('').filter((c) => c !== original).join('');
   if (candidates.length === 0) candidates = pool || DEFAULT_DECOYS;
   if (candidates.length === 0) candidates = 'X';
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
+/**
+ * Chunked reveal with typo corruption and healing intro animation.
+ *
+ * Each chunk of words appears instantly in its final layout position without
+ * fade or translate animations. As subsequent chunks appear, earlier chunks
+ * develop temporary typographical errors which later heal back to the original text.
+ * Swapped glyphs render at their natural typographic width without clipping.
+ */
 export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions): AnimationHandle {
   const element = resolveElement(target);
   if (!element) return createDummyHandle();
@@ -81,10 +87,9 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
     side = 'random',
     travelDuration = 260,
     letterStagger = 45,
-    revealDuration = 220,
     decoyChars,
     easing = 'cubic-bezier(0.16, 1, 0.3, 1)',
-    revertOnFinish = true
+    revertOnFinish = true,
   } = options || {};
 
   const { chars, revert, granularity } = splitChars(element);
@@ -92,10 +97,21 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
     revert();
     return createDummyHandle();
   }
-  
+
+  const words = Array.from(element.querySelectorAll<HTMLElement>('.wim-word'));
+  if (words.length === 0) {
+    revert();
+    return createDummyHandle();
+  }
+
   let isCanceled = false;
   const timeouts = new Set<ReturnType<typeof setTimeout>>();
   const animations = new Set<Animation>();
+
+  let resolveFinished!: () => void;
+  const finished = new Promise<void>((res) => {
+    resolveFinished = res;
+  });
 
   const cancel = () => {
     isCanceled = true;
@@ -108,25 +124,27 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
     resolveFinished();
   };
 
-  let resolveFinished!: () => void;
-  const finished = new Promise<void>(res => { resolveFinished = res; });
-  
   registerIntro(element as HTMLElement, { cancel });
 
-  // Store active intro to handle cleanup
-  const words = Array.from(element.querySelectorAll<HTMLElement>('.wim-word'));
-  const chunks: { words: HTMLElement[], index: number }[] = [];
+  // Group words into chunks of chunkSize
+  const chunks: { words: HTMLElement[]; index: number }[] = [];
   for (let i = 0; i < words.length; i += chunkSize) {
     chunks.push({ words: words.slice(i, i + chunkSize), index: chunks.length });
   }
 
-  // Pre-measure and setup slots
+  // Pre-hide all words so initial layout is fully reserved without collapsing.
+  // Using visibility: hidden preserves all dimensions, margins, and line wraps.
+  for (const word of words) {
+    word.style.visibility = 'hidden';
+  }
+
   type CharData = {
     slot: HTMLElement;
     current: HTMLElement;
     incoming: HTMLElement;
     origText: string;
-    wordChars: CharData[]; // reference to other chars in same word
+    targetText: string;
+    wordChars: CharData[];
   };
   const charDataList: CharData[] = [];
 
@@ -136,50 +154,49 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
       const wordCharData: CharData[] = [];
       for (const c of wChars) {
         const text = c.textContent || '';
-        if (!text.trim()) continue; // skip spaces just in case
-        
-        const rect = c.getBoundingClientRect();
+        if (!text.trim()) continue; // skip pure whitespace if any
+
+        // Setup character slot with natural width (no fixed width or clipPath)
         c.style.display = 'inline-block';
-        c.style.width = `${rect.width}px`;
-        c.style.textAlign = 'center';
         c.style.position = 'relative';
         c.style.overflow = 'visible';
-        c.style.clipPath = 'inset(-0.3em 0)';
         c.textContent = '';
-        c.style.opacity = '0';
 
         const curr = document.createElement('span');
         curr.setAttribute('aria-hidden', 'true');
         curr.textContent = text;
         curr.style.display = 'inline-block';
-        
+
         const inc = document.createElement('span');
         inc.setAttribute('aria-hidden', 'true');
         inc.style.display = 'inline-block';
         inc.style.position = 'absolute';
         inc.style.top = '0';
         inc.style.left = '0';
-        inc.style.width = '100%';
+        inc.style.whiteSpace = 'nowrap';
         inc.style.visibility = 'hidden';
 
         c.appendChild(curr);
         c.appendChild(inc);
 
-        const cd: CharData = { slot: c, current: curr, incoming: inc, origText: text, wordChars: wordCharData };
+        const cd: CharData = {
+          slot: c,
+          current: curr,
+          incoming: inc,
+          origText: text,
+          targetText: text,
+          wordChars: wordCharData,
+        };
         wordCharData.push(cd);
         charDataList.push(cd);
       }
     }
-  } else {
-    // word granularity
-    for (const w of words) {
-      w.style.opacity = '0';
-    }
   }
 
-  const chunkEvents: { time: number, type: 'reveal'|'corrupt'|'heal', chunkIndex: number }[] = [];
-  
-  if (chunks.length === 1 || granularity === 'word') {
+  // Build the schedule of chunk events
+  const chunkEvents: { time: number; type: 'reveal' | 'corrupt' | 'heal'; chunkIndex: number }[] = [];
+
+  if (chunks.length <= 1 || granularity === 'word') {
     for (let i = 0; i < chunks.length; i++) {
       chunkEvents.push({ time: i * chunkDelay, type: 'reveal', chunkIndex: i });
     }
@@ -187,15 +204,16 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
     for (let i = 0; i < chunks.length; i++) {
       const revealTime = i * chunkDelay;
       chunkEvents.push({ time: revealTime, type: 'reveal', chunkIndex: i });
-      
-      if (i < chunks.length - 1) { // Never corrupt last chunk
-        const corruptTime = revealTime + revealDuration + corruptAfterChunks * chunkDelay;
+
+      if (i < chunks.length - 1) {
+        // Never corrupt the final chunk
+        const corruptTime = revealTime + corruptAfterChunks * chunkDelay;
         chunkEvents.push({ time: corruptTime, type: 'corrupt', chunkIndex: i });
-        
-        const hAfter = Array.isArray(healAfterChunks) 
+
+        const hAfter = Array.isArray(healAfterChunks)
           ? Math.floor(Math.random() * (healAfterChunks[1] - healAfterChunks[0] + 1)) + healAfterChunks[0]
           : healAfterChunks;
-        
+
         const healTime = corruptTime + hAfter * chunkDelay;
         chunkEvents.push({ time: healTime, type: 'heal', chunkIndex: i });
       }
@@ -203,7 +221,7 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
   }
 
   chunkEvents.sort((a, b) => a.time - b.time);
-  
+
   let chunksCompleted = 0;
   const totalExpectedCompletions = chunkEvents.length;
 
@@ -228,119 +246,107 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
     timeouts.add(t);
   };
 
-  const playAnim = (el: HTMLElement, keyframes: Keyframe[], options: KeyframeAnimationOptions) => {
-    const a = el.animate(keyframes, options);
+  const playAnim = (el: HTMLElement, keyframes: Keyframe[], animOptions: KeyframeAnimationOptions) => {
+    const a = el.animate(keyframes, animOptions);
     animations.add(a);
-    a.onfinish = () => { animations.delete(a); };
+    a.onfinish = () => {
+      animations.delete(a);
+    };
     return a;
   };
 
   const executeMutation = (cd: CharData, newChar: string, mode: 'instant' | 'from-behind' | 'mixed') => {
     let actualMode = mode === 'mixed' ? (Math.random() < behindRatio ? 'from-behind' : 'instant') : mode;
-    
+
     if (actualMode === 'from-behind') {
       const idx = cd.wordChars.indexOf(cd);
       let actualSide = side;
       if (actualSide === 'random') actualSide = Math.random() < 0.5 ? 'left' : 'right';
-      
+
       if (actualSide === 'left' && idx === 0) actualSide = 'right';
       if (actualSide === 'right' && idx === cd.wordChars.length - 1) actualSide = 'left';
-      
+
       if ((actualSide === 'left' && idx === 0) || (actualSide === 'right' && idx === cd.wordChars.length - 1)) {
         actualMode = 'instant'; // 1-char word fallback
       } else {
+        const neighbour = actualSide === 'left' ? cd.wordChars[idx - 1] : cd.wordChars[idx + 1];
+        if (neighbour) {
+          neighbour.slot.style.zIndex = '1';
+        }
+        cd.slot.style.zIndex = '0';
+
         cd.incoming.textContent = newChar;
         cd.incoming.style.visibility = 'visible';
-        
+
         const fromX = actualSide === 'left' ? '-100%' : '100%';
-        const a1 = playAnim(cd.incoming, [
-          { transform: `translateX(${fromX})` },
-          { transform: 'translateX(0)' }
-        ], { duration: travelDuration, easing, fill: 'forwards' });
-        
+        const a1 = playAnim(
+          cd.incoming,
+          [{ transform: `translateX(${fromX})` }, { transform: 'translateX(0)' }],
+          { duration: travelDuration, easing, fill: 'forwards' }
+        );
+
         const fadeTime = travelDuration * 0.6;
-        const a2 = playAnim(cd.current, [
-          { opacity: 1 },
-          { opacity: 0 }
-        ], { duration: fadeTime, easing, fill: 'forwards' });
-        
+        const a2 = playAnim(cd.current, [{ opacity: 1 }, { opacity: 0 }], {
+          duration: fadeTime,
+          easing,
+          fill: 'forwards',
+        });
+
         scheduleTimeout(() => {
           cd.current.textContent = newChar;
-          a1.cancel(); a2.cancel();
+          a1.cancel();
+          a2.cancel();
           cd.current.style.opacity = '1';
           cd.incoming.style.visibility = 'hidden';
+          cd.incoming.textContent = '';
+          cd.incoming.style.transform = 'none';
+          if (neighbour) {
+            neighbour.slot.style.zIndex = '';
+          }
+          cd.slot.style.zIndex = '';
         }, travelDuration);
       }
     }
-    
+
     if (actualMode === 'instant') {
       cd.current.textContent = newChar;
     }
   };
 
-  chunkEvents.forEach(ev => {
+  chunkEvents.forEach((ev) => {
     scheduleTimeout(() => {
       const chunk = chunks[ev.chunkIndex];
-      
+
       if (ev.type === 'reveal') {
-        if (granularity === 'word') {
-          chunk.words.forEach(w => {
-            w.style.opacity = '1';
-            playAnim(w, [
-              { opacity: 0, transform: 'translateY(8px)' },
-              { opacity: 1, transform: 'translateY(0)' }
-            ], { duration: revealDuration, easing, fill: 'forwards' });
-          });
-          onEventDone();
-        } else {
-          let charsToReveal: CharData[] = [];
-          for (const w of chunk.words) {
-            const wChars = Array.from(w.querySelectorAll<HTMLElement>('.wim-char'));
-            wChars.forEach(wc => {
-              const cd = charDataList.find(x => x.slot === wc);
-              if (cd) charsToReveal.push(cd);
-            });
-          }
-          if (charsToReveal.length === 0) {
-            onEventDone();
-            return;
-          }
-          charsToReveal.forEach((cd, i) => {
-            scheduleTimeout(() => {
-              cd.slot.style.opacity = '1';
-              playAnim(cd.slot, [
-                { opacity: 0, transform: 'translateY(8px)' },
-                { opacity: 1, transform: 'translateY(0)' }
-              ], { duration: revealDuration, easing, fill: 'forwards' });
-              
-              if (i === charsToReveal.length - 1) {
-                scheduleTimeout(onEventDone, revealDuration);
-              }
-            }, i * 20); // ~20ms per char stagger for reveal
-          });
-        }
+        // Complete chunk becomes visible instantly in its final position without any animation
+        chunk.words.forEach((w) => {
+          w.style.visibility = 'visible';
+        });
+        onEventDone();
       } else if (ev.type === 'corrupt' && granularity === 'char') {
-        // find eligible chars
         const eligible: CharData[] = [];
         for (const w of chunk.words) {
           const wChars = Array.from(w.querySelectorAll<HTMLElement>('.wim-char'));
-          let wordEligible = wChars.map(wc => charDataList.find(x => x.slot === wc)).filter(x => x && isEligible(x.origText)) as CharData[];
+          const wordEligible = wChars
+            .map((wc) => charDataList.find((x) => x.slot === wc))
+            .filter((x): x is CharData => Boolean(x && isEligible(x.origText)));
           // Max 2 corrupted per word
           wordEligible.sort(() => Math.random() - 0.5);
           eligible.push(...wordEligible.slice(0, 2));
         }
-        
+
         let toCorruptCount = Math.ceil(eligible.length * corruptionRate);
         if (eligible.length > 0 && toCorruptCount === 0) toCorruptCount = 1;
-        
+
         const toCorrupt = eligible.sort(() => Math.random() - 0.5).slice(0, toCorruptCount);
-        
+
         if (toCorrupt.length === 0) {
           onEventDone();
         } else {
           toCorrupt.forEach((cd, i) => {
             scheduleTimeout(() => {
               const decoy = getDecoy(cd.origText, decoyChars);
+              cd.targetText = decoy;
               executeMutation(cd, decoy, corruptMode);
               if (i === toCorrupt.length - 1) {
                 scheduleTimeout(onEventDone, travelDuration);
@@ -352,19 +358,20 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
         const toHeal: CharData[] = [];
         for (const w of chunk.words) {
           const wChars = Array.from(w.querySelectorAll<HTMLElement>('.wim-char'));
-          wChars.forEach(wc => {
-            const cd = charDataList.find(x => x.slot === wc);
-            if (cd && cd.current.textContent !== cd.origText) {
+          wChars.forEach((wc) => {
+            const cd = charDataList.find((x) => x.slot === wc);
+            if (cd && cd.targetText !== cd.origText) {
               toHeal.push(cd);
             }
           });
         }
-        
+
         if (toHeal.length === 0) {
           onEventDone();
         } else {
           toHeal.forEach((cd, i) => {
             scheduleTimeout(() => {
+              cd.targetText = cd.origText;
               executeMutation(cd, cd.origText, healMode);
               if (i === toHeal.length - 1) {
                 scheduleTimeout(onEventDone, travelDuration);
