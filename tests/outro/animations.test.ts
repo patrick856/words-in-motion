@@ -3,7 +3,6 @@ import { blackHole } from '../../src/outro/blackHole';
 import { paperCut } from '../../src/outro/paperCut';
 import { portal } from '../../src/outro/portal';
 import { breakAndFade } from '../../src/outro/breakAndFade';
-import { portalReverse } from '../../src/outro/portalReverse';
 
 describe('Outro Animations', () => {
   let container: HTMLElement;
@@ -28,8 +27,17 @@ describe('Outro Animations', () => {
     handle.cancel();
   });
 
+  it('paperCut works seamlessly with multiline text', () => {
+    container.textContent = 'Line One Outro\nLine Two Outro\nLine Three Outro';
+    const handle = paperCut(container, { strips: 3 });
+    expect(handle.finished).toBeInstanceOf(Promise);
+    expect(typeof handle.cancel).toBe('function');
+    handle.cancel();
+    expect(container.textContent).toBe('Line One Outro\nLine Two Outro\nLine Three Outro');
+  });
+
   it('portal creates handle and cancels cleanly', () => {
-    const handle = portal(container, { direction: 'vanishing-point' });
+    const handle = portal(container);
     expect(handle.finished).toBeInstanceOf(Promise);
     expect(typeof handle.cancel).toBe('function');
     handle.cancel();
@@ -37,13 +45,6 @@ describe('Outro Animations', () => {
 
   it('breakAndFade creates handle and cancels cleanly', () => {
     const handle = breakAndFade(container);
-    expect(handle.finished).toBeInstanceOf(Promise);
-    expect(typeof handle.cancel).toBe('function');
-    handle.cancel();
-  });
-
-  it('portalReverse creates handle and cancels cleanly', () => {
-    const handle = portalReverse(container);
     expect(handle.finished).toBeInstanceOf(Promise);
     expect(typeof handle.cancel).toBe('function');
     handle.cancel();

@@ -2,6 +2,7 @@ export { pull, type PullOptions } from './pull';
 export { push, type PushOptions } from './push';
 export { proximityFade, type ProximityFadeOptions } from './proximityFade';
 export { proximityFlip, type ProximityFlipOptions } from './proximityFlip';
+export { proximityRotate, type ProximityRotateOptions } from './proximityRotate';
 export { proximityShake, type ProximityShakeOptions } from './proximityShake';
 export { obstaclePush, type ObstaclePushOptions } from './obstaclePush';
 export { fontWeight, type FontWeightOptions } from './fontWeight';

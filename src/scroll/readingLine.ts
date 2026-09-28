@@ -9,7 +9,7 @@ export interface ReadingLineOptions extends BaseScrollScrubOptions {
 
 /**
  * Reading-line opacity follow scroll scrub animation.
- * Renders text at low opacity and ramps each word's opacity to 100% sequentially based on scroll progress.
+ * Renders text at low opacity and ramps each word's opacity to 100% sequentially (word by word) on scroll.
  */
 export function readingLine(
   target: Target,
@@ -18,7 +18,7 @@ export function readingLine(
   const { baseOpacity = 0.25, ...scrubOptions } = options || {};
 
   return createScrollScrub(target, scrubOptions, ({ progress, index, total }) => {
-    const wordStep = 1 / total;
+    const wordStep = 1 / Math.max(1, total);
     const wordStartProgress = index * wordStep;
     const wordEndProgress = (index + 1) * wordStep;
 

@@ -64,6 +64,7 @@
     "build": "tsup && tsc --emitDeclarationOnly",
     "dev": "tsup --watch",
     "playground": "vite playground",
+    "temp-playground": "vite playground/temp-playground.html",
     "typecheck": "tsc --project tsconfig.typecheck.json",
     "test": "vitest run",
     "lint": "eslint ."

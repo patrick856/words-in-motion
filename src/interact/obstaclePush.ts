@@ -2,33 +2,41 @@ import type { BaseInteractOptions, InteractHandle, Target } from '../core/types'
 import { createInteraction } from '../core/interact';
 
 export interface ObstaclePushOptions extends BaseInteractOptions {
-  /** Maximum push distance in pixels. Defaults to 45. */
-  strength?: number;
+  /** Radius of the solid cursor obstacle body in pixels. Defaults to 35. */
+  cursorRadius?: number;
 }
 
 /**
- * Cursor-as-obstacle push interact effect.
- * Treats cursor as occupying the same visual plane, pushing nearby characters aside as an obstacle.
+ * Cursor-as-obstacle physical push interact effect.
+ * Treats the cursor as a solid physical body on the same visual plane.
+ * When the cursor hits/touches characters, it physically pushes them aside along the collision vector, and characters spring back when cleared.
  */
 export function obstaclePush(
   target: Target,
   options?: ObstaclePushOptions
 ): InteractHandle {
-  const strength = options?.strength ?? 45;
+  const cursorRadius = options?.cursorRadius ?? 35;
 
-  return createInteraction(target, options, ({ angle, progress }) => {
-    if (progress <= 0) {
-      return { translateX: 0, translateY: 0 };
+  return createInteraction(target, options, ({ dx, dy, distance: dist }) => {
+    // If cursor circle collides with character center
+    if (dist > 0 && dist < cursorRadius) {
+      const overlap = cursorRadius - dist;
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      // Physically displace character along collision vector out of the cursor body
+      const translateX = -nx * overlap;
+      const translateY = -ny * overlap;
+
+      return {
+        translateX,
+        translateY,
+      };
     }
 
-    // Exponential push response when cursor enters bounding radius
-    const pushFactor = Math.pow(progress, 1.5) * strength;
-    const translateX = -Math.cos(angle) * pushFactor;
-    const translateY = -Math.sin(angle) * pushFactor;
-
     return {
-      translateX,
-      translateY,
+      translateX: 0,
+      translateY: 0,
     };
   });
 }

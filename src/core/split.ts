@@ -70,21 +70,28 @@ export function splitWords(target: Target): SplitWordsResult {
 
   element.textContent = '';
 
-  const wordTokens = text.trim().split(/\s+/).filter(Boolean);
   const words: HTMLElement[] = [];
+  const lines = text.split('\n');
 
-  wordTokens.forEach((wordText, index) => {
-    const wordSpan = document.createElement('span');
-    wordSpan.style.display = 'inline-block';
-    wordSpan.style.whiteSpace = 'nowrap';
-    wordSpan.setAttribute('aria-hidden', 'true');
-    wordSpan.textContent = wordText;
+  lines.forEach((lineText, lineIndex) => {
+    const wordTokens = lineText.trim().split(/\s+/).filter(Boolean);
+    wordTokens.forEach((wordText, wordIndex) => {
+      const wordSpan = document.createElement('span');
+      wordSpan.style.display = 'inline-block';
+      wordSpan.style.whiteSpace = 'nowrap';
+      wordSpan.setAttribute('aria-hidden', 'true');
+      wordSpan.textContent = wordText;
 
-    element.appendChild(wordSpan);
-    words.push(wordSpan);
+      element.appendChild(wordSpan);
+      words.push(wordSpan);
 
-    if (index < wordTokens.length - 1) {
-      element.appendChild(document.createTextNode(' '));
+      if (wordIndex < wordTokens.length - 1) {
+        element.appendChild(document.createTextNode(' '));
+      }
+    });
+
+    if (lineIndex < lines.length - 1) {
+      element.appendChild(document.createElement('br'));
     }
   });
 
@@ -127,30 +134,37 @@ export function splitChars(target: Target): SplitCharsResult {
 
   element.textContent = '';
 
-  const wordTokens = text.trim().split(/\s+/).filter(Boolean);
   const chars: HTMLElement[] = [];
+  const lines = text.split('\n');
 
-  wordTokens.forEach((wordText, wordIndex) => {
-    const wordSpan = document.createElement('span');
-    wordSpan.style.display = 'inline-block';
-    wordSpan.style.whiteSpace = 'nowrap';
-    wordSpan.setAttribute('aria-hidden', 'true');
+  lines.forEach((lineText, lineIndex) => {
+    const wordTokens = lineText.trim().split(/\s+/).filter(Boolean);
+    wordTokens.forEach((wordText, wordIndex) => {
+      const wordSpan = document.createElement('span');
+      wordSpan.style.display = 'inline-block';
+      wordSpan.style.whiteSpace = 'nowrap';
+      wordSpan.setAttribute('aria-hidden', 'true');
 
-    const graphemes = segmentGraphemes(wordText);
-    graphemes.forEach((charText) => {
-      const charSpan = document.createElement('span');
-      charSpan.style.display = 'inline-block';
-      charSpan.setAttribute('aria-hidden', 'true');
-      charSpan.textContent = charText;
+      const graphemes = segmentGraphemes(wordText);
+      graphemes.forEach((charText) => {
+        const charSpan = document.createElement('span');
+        charSpan.style.display = 'inline-block';
+        charSpan.setAttribute('aria-hidden', 'true');
+        charSpan.textContent = charText;
 
-      wordSpan.appendChild(charSpan);
-      chars.push(charSpan);
+        wordSpan.appendChild(charSpan);
+        chars.push(charSpan);
+      });
+
+      element.appendChild(wordSpan);
+
+      if (wordIndex < wordTokens.length - 1) {
+        element.appendChild(document.createTextNode(' '));
+      }
     });
 
-    element.appendChild(wordSpan);
-
-    if (wordIndex < wordTokens.length - 1) {
-      element.appendChild(document.createTextNode(' '));
+    if (lineIndex < lines.length - 1) {
+      element.appendChild(document.createElement('br'));
     }
   });
 

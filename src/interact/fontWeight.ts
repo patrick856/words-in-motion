@@ -3,24 +3,24 @@ import { createInteraction } from '../core/interact';
 import { lerp } from '../core/math';
 
 export interface FontWeightOptions extends BaseInteractOptions {
-  /** Maximum scale multiplier at peak proximity. Defaults to 1.35. */
-  maxScale?: number;
+  /** Minimum baseline font weight. Defaults to 300. */
+  minWeight?: number;
+  /** Maximum font weight at peak proximity. Defaults to 900. */
+  maxWeight?: number;
 }
 
 /**
- * Proximity font-weight / scale increase cursor interact effect.
- * Increases character scale and weight proportional to cursor proximity.
+ * Proximity font-weight increase cursor interact effect.
+ * Smoothly ramps CSS font-weight from light (300) to bold/bolder (900) proportional to cursor proximity without scaling element size.
  */
 export function fontWeight(
   target: Target,
   options?: FontWeightOptions
 ): InteractHandle {
-  const maxScale = options?.maxScale ?? 1.35;
+  const { minWeight = 300, maxWeight = 900 } = options || {};
 
-  return createInteraction(target, options, ({ progress }) => {
-    const scale = lerp(1, maxScale, progress);
-    return {
-      scale,
-    };
+  return createInteraction(target, options, ({ char, progress }) => {
+    const currentWeight = Math.round(lerp(minWeight, maxWeight, progress));
+    char.style.fontWeight = String(currentWeight);
   });
 }

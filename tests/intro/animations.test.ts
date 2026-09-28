@@ -48,4 +48,13 @@ describe('Intro Animations', () => {
     expect(typeof handle.cancel).toBe('function');
     handle.cancel();
   });
+
+  it('stripRealign works seamlessly with multiline text', () => {
+    container.textContent = 'Line One Text\nLine Two Text\nLine Three Text';
+    const handle = stripRealign(container, { strips: 3 });
+    expect(handle.finished).toBeInstanceOf(Promise);
+    expect(typeof handle.cancel).toBe('function');
+    handle.cancel();
+    expect(container.textContent).toBe('Line One Text\nLine Two Text\nLine Three Text');
+  });
 });

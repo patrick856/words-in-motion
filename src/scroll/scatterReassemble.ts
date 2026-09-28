@@ -3,8 +3,8 @@ import { createScrollScrub } from '../core/scrollHelpers';
 import { lerp } from '../core/math';
 
 export interface ScatterReassembleOptions extends BaseScrollScrubOptions {
-  /** Maximum scatter radius in pixels. Defaults to 60. */
-  radius?: number;
+  /** Maximum scatter distance in pixels (tightly bounded to 1-2 letter widths). Defaults to 22. */
+  maxScatter?: number;
 }
 
 interface ScatterOffset {
@@ -15,22 +15,25 @@ interface ScatterOffset {
 
 /**
  * Scattered letters reassemble scroll scrub animation.
- * Positions letters at randomized scattered offsets that smoothly reassemble into place on scroll.
+ * Positions letters at tightly bounded scattered offsets (1-2 letters away) that smoothly assemble into place on scroll.
  */
 export function scatterReassemble(
   target: Target,
   options?: ScatterReassembleOptions
 ): ScrollScrubHandle {
-  const { radius = 60, ...scrubOptions } = options || {};
+  const { maxScatter = 22, ...scrubOptions } = options || {};
 
-  // Deterministic pseudo-random seed per index so offsets are stable across renders
+  // Deterministic pseudo-random seed per character index for organic 2D scattering
   const getSeedOffset = (index: number): ScatterOffset => {
-    const angle = (index * 137.5 * Math.PI) / 180;
-    const r = ((index * 37) % radius) + 15;
-    const rot = ((index * 53) % 60) - 30;
+    const seed = (index * 9301 + 49297) % 233280;
+    const rnd = seed / 233280;
+    const angle = (index * 137.5 * Math.PI) / 180 + rnd * Math.PI;
+    const dist = (0.5 + rnd * 0.5) * maxScatter;
+    const rot = (rnd - 0.5) * 24;
+
     return {
-      x: Math.cos(angle) * r,
-      y: Math.sin(angle) * r,
+      x: Math.cos(angle) * dist,
+      y: Math.sin(angle) * dist,
       rotate: rot,
     };
   };
@@ -40,7 +43,7 @@ export function scatterReassemble(
     const currX = lerp(initial.x, 0, progress);
     const currY = lerp(initial.y, 0, progress);
     const currRot = lerp(initial.rotate, 0, progress);
-    const currOpacity = lerp(0.4, 1, progress);
+    const currOpacity = lerp(0.5, 1, progress);
 
     return {
       translateX: currX,

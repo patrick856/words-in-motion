@@ -8,7 +8,6 @@ import { blackHole } from '../src/outro/blackHole';
 import { paperCut } from '../src/outro/paperCut';
 import { portal } from '../src/outro/portal';
 import { breakAndFade } from '../src/outro/breakAndFade';
-import { portalReverse } from '../src/outro/portalReverse';
 
 import { waveRelay } from '../src/scroll/waveRelay';
 import { readingLine } from '../src/scroll/readingLine';
@@ -18,6 +17,7 @@ import { pull } from '../src/interact/pull';
 import { push } from '../src/interact/push';
 import { proximityFade } from '../src/interact/proximityFade';
 import { proximityFlip } from '../src/interact/proximityFlip';
+import { proximityRotate } from '../src/interact/proximityRotate';
 import { proximityShake } from '../src/interact/proximityShake';
 import { obstaclePush } from '../src/interact/obstaclePush';
 import { fontWeight } from '../src/interact/fontWeight';
@@ -55,7 +55,6 @@ export const registry: AnimationEntry[] = [
   { name: 'paperCut', category: 'outro', run: (el) => paperCut(el) },
   { name: 'portal', category: 'outro', run: (el) => portal(el) },
   { name: 'breakAndFade', category: 'outro', run: (el) => breakAndFade(el) },
-  { name: 'portalReverse', category: 'outro', run: (el) => portalReverse(el) },
 
   // Scroll animations
   { name: 'waveRelay', category: 'scroll', run: (el) => waveRelay(el) },
@@ -67,6 +66,7 @@ export const registry: AnimationEntry[] = [
   { name: 'push', category: 'interact', run: (el) => push(el) },
   { name: 'proximityFade', category: 'interact', run: (el) => proximityFade(el) },
   { name: 'proximityFlip', category: 'interact', run: (el) => proximityFlip(el) },
+  { name: 'proximityRotate', category: 'interact', run: (el) => proximityRotate(el) },
   { name: 'proximityShake', category: 'interact', run: (el) => proximityShake(el) },
   { name: 'obstaclePush', category: 'interact', run: (el) => obstaclePush(el) },
   { name: 'fontWeight', category: 'interact', run: (el) => fontWeight(el) },

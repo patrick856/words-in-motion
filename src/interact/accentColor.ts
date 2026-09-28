@@ -1,17 +1,20 @@
 import type { BaseInteractOptions, InteractHandle, Target } from '../core/types';
 import { createInteraction } from '../core/interact';
+import { lerp } from '../core/math';
 
 export interface AccentColorOptions extends BaseInteractOptions {
-  /** Accent color to transition toward on proximity. Defaults to '#e11d48'. */
+  /** Target accent color hex code on proximity. Defaults to '#e11d48'. */
   accentColor?: string;
+  /** Initial base text color hex code. Defaults to '#1c1917'. */
+  baseColor?: string;
 }
 
 function parseHex(hex: string): { r: number; g: number; b: number } {
-  let c = hex.replace('#', '');
+  let c = hex.replace('#', '').trim();
   if (c.length === 3) {
     c = c.split('').map((char) => char + char).join('');
   }
-  const num = parseInt(c, 16);
+  const num = parseInt(c || '000000', 16);
   return {
     r: (num >> 16) & 255,
     g: (num >> 8) & 255,
@@ -21,13 +24,17 @@ function parseHex(hex: string): { r: number; g: number; b: number } {
 
 /**
  * Proximity accent-color fill cursor interact effect.
- * Interpolates character color toward a configurable accent color proportional to cursor proximity.
+ * Smoothly interpolates numerical RGB values from base color to accent color proportional to cursor proximity.
  */
 export function accentColor(
   target: Target,
   options?: AccentColorOptions
 ): InteractHandle {
-  const accent = options?.accentColor ?? '#e11d48';
+  const accentHex = options?.accentColor ?? '#e11d48';
+  const baseHex = options?.baseColor ?? '#1c1917';
+
+  const targetRgb = parseHex(accentHex);
+  const baseRgb = parseHex(baseHex);
 
   return createInteraction(target, options, ({ char, progress }) => {
     if (progress <= 0) {
@@ -35,8 +42,10 @@ export function accentColor(
       return;
     }
 
-    const targetRgb = parseHex(accent);
-    // Render accent color transition via CSS color property or filter
-    char.style.color = `rgba(${targetRgb.r}, ${targetRgb.g}, ${targetRgb.b}, ${progress.toFixed(2)})`;
+    const r = Math.round(lerp(baseRgb.r, targetRgb.r, progress));
+    const g = Math.round(lerp(baseRgb.g, targetRgb.g, progress));
+    const b = Math.round(lerp(baseRgb.b, targetRgb.b, progress));
+
+    char.style.color = `rgb(${r}, ${g}, ${b})`;
   });
 }
