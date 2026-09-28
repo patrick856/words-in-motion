@@ -1,11 +1,34 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro } from '../core/motion';
+import { prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro, normalizeDuration, runAnimationWithTrigger } from '../core/motion';
 import { splitChars } from '../core/split';
 
+export type RevealBy = 'lines' | 'chunks';
+
 export interface ChunkedScrambleOptions extends BaseOptions {
-  /** Words per chunk. Defaults to 2. */
+  /**
+   * Total target duration of the effect in milliseconds.
+   * Reveal, corruption, healing, and letter transition timings scale proportionally unless explicitly overridden.
+   * @default 1800
+   */
+  duration?: number;
+  /**
+   * Determines how text is grouped for reveal and corruption scheduling.
+   *
+   * - "lines": reveal one rendered horizontal line at a time.
+   * - "chunks": reveal groups of words controlled by `chunkSize`.
+   *
+   * @default "lines"
+   */
+  revealBy?: RevealBy;
+  /**
+   * Number of words per reveal group when `revealBy` is `"chunks"`.
+   * Ignored when `revealBy` is `"lines"`.
+   * @default 2
+   */
   chunkSize?: number;
-  /** MS between chunk starts. Defaults to 320. */
+  /** MS cadence for corruption/healing effect ticks. Defaults to 300 scaled by duration. */
+  effectInterval?: number;
+  /** Legacy alias for effectInterval. Defaults to 300 scaled by duration. */
   chunkDelay?: number;
   /** Chunks after reveal before corruption. Defaults to 1. */
   corruptAfterChunks?: number;
@@ -21,9 +44,9 @@ export interface ChunkedScrambleOptions extends BaseOptions {
   behindRatio?: number;
   /** Which neighbour for from-behind. Defaults to 'random'. */
   side?: 'left' | 'right' | 'random';
-  /** MS for from-behind slide. Defaults to 260. */
+  /** MS for from-behind slide. Defaults to 260 scaled by duration. */
   travelDuration?: number;
-  /** MS between individual letter mutations during corruption or healing. Defaults to 45. */
+  /** MS between individual letter mutations during corruption or healing. Defaults to 45 scaled by duration. */
   letterStagger?: number;
   /** Optional replacement pool override. */
   decoyChars?: string;
@@ -32,6 +55,11 @@ export interface ChunkedScrambleOptions extends BaseOptions {
 }
 
 const DEFAULT_DECOYS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const DEFAULT_DURATION = 1800;
+const DEFAULT_EFFECT_INTERVAL = 300;
+const DEFAULT_TRAVEL_DURATION = 260;
+const DEFAULT_LETTER_STAGGER = 45;
+const REVEAL_SPEED_MULTIPLIER = 5;
 
 function isEligible(char: string): boolean {
   return /^[a-zA-Z0-9]$/.test(char);
@@ -62,22 +90,90 @@ function getDecoy(original: string, pool: string | undefined): string {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
+function hasLineBreakBetween(prev: HTMLElement, curr: HTMLElement): boolean {
+  let node: Node | null = prev.nextSibling;
+  while (node && node !== curr) {
+    if (node.nodeName === 'BR') return true;
+    if (node.nodeType === Node.ELEMENT_NODE && (node as Element).querySelector('br')) return true;
+    node = node.nextSibling;
+  }
+  return false;
+}
+
+function getWordMetrics(el: HTMLElement) {
+  const rect = el.getBoundingClientRect();
+  if (rect.height > 0 || rect.width > 0) {
+    return { top: rect.top, height: rect.height };
+  }
+  return { top: el.offsetTop, height: el.offsetHeight };
+}
+
+interface ScrambleGroup {
+  words: HTMLElement[];
+  index: number;
+}
+
+function groupWordsByLine(words: HTMLElement[]): ScrambleGroup[] {
+  if (words.length === 0) return [];
+
+  const lineGroups: HTMLElement[][] = [];
+  let currentGroup: HTMLElement[] = [words[0]];
+  lineGroups.push(currentGroup);
+
+  let currentLineTops: number[] = [getWordMetrics(words[0]).top];
+  let lastHeight = getWordMetrics(words[0]).height;
+
+  for (let i = 1; i < words.length; i++) {
+    const prevWord = words[i - 1];
+    const currWord = words[i];
+
+    const hasBr = hasLineBreakBetween(prevWord, currWord);
+    const currMetrics = getWordMetrics(currWord);
+
+    // Mean top of words currently assigned to the active line
+    const avgCurrentTop = currentLineTops.reduce((a, b) => a + b, 0) / currentLineTops.length;
+    const refHeight = currMetrics.height || lastHeight || 16;
+    const tolerance = Math.max(4, Math.round(refHeight * 0.4));
+
+    const isNewLine = hasBr || (currMetrics.top > avgCurrentTop + tolerance);
+
+    if (isNewLine) {
+      currentGroup = [currWord];
+      lineGroups.push(currentGroup);
+      currentLineTops = [currMetrics.top];
+      if (currMetrics.height > 0) lastHeight = currMetrics.height;
+    } else {
+      currentGroup.push(currWord);
+      currentLineTops.push(currMetrics.top);
+      if (currMetrics.height > 0) lastHeight = currMetrics.height;
+    }
+  }
+
+  return lineGroups.map((groupWords, index) => ({
+    words: groupWords,
+    index,
+  }));
+}
+
 /**
- * Chunked reveal with typo corruption and healing intro animation.
+ * Chunked or line-by-line reveal with typo corruption and healing intro animation.
  *
- * Each chunk of words appears instantly in its final layout position without
- * fade or translate animations. As subsequent chunks appear, earlier chunks
- * develop temporary typographical errors which later heal back to the original text.
- * Swapped glyphs render at their natural typographic width without clipping.
+ * When `revealBy: 'lines'` (default), text reveals one rendered horizontal line at a time.
+ * When `revealBy: 'chunks'`, text reveals in word groups controlled by `chunkSize`.
+ * Each group appears instantly in its final layout position without fade or translate animations.
+ * Text reveals quickly (5× faster than corruption). As groups appear, earlier groups
+ * (including the final group in the tail phase) develop temporary typographical errors which
+ * later heal back to the original text. Swapped glyphs render at their natural typographic width.
  */
-export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions): AnimationHandle {
-  const element = resolveElement(target);
-  if (!element) return createDummyHandle();
+function runSingleChunkedScramble(element: HTMLElement, options?: ChunkedScrambleOptions): AnimationHandle {
   if (prefersReducedMotion()) return createDummyHandle();
 
+  const duration = normalizeDuration(options?.duration, DEFAULT_DURATION);
+  const timingScale = duration / DEFAULT_DURATION;
+
   const {
+    revealBy = 'lines',
     chunkSize = 2,
-    chunkDelay = 320,
     corruptAfterChunks = 1,
     healAfterChunks = 2,
     corruptionRate = 0.3,
@@ -85,12 +181,27 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
     healMode = 'mixed',
     behindRatio = 0.5,
     side = 'random',
-    travelDuration = 260,
-    letterStagger = 45,
     decoyChars,
     easing = 'cubic-bezier(0.16, 1, 0.3, 1)',
     revertOnFinish = true,
   } = options || {};
+
+  // Base corruption/healing cadence and derived fast reveal interval
+  const corruptionTick = typeof options?.effectInterval === 'number'
+    ? options.effectInterval
+    : typeof options?.chunkDelay === 'number'
+    ? options.chunkDelay
+    : Math.max(20, Math.round(DEFAULT_EFFECT_INTERVAL * timingScale));
+
+  const revealTick = corruptionTick / REVEAL_SPEED_MULTIPLIER;
+
+  const actualTravelDuration = typeof options?.travelDuration === 'number'
+    ? options.travelDuration
+    : Math.max(10, Math.round(DEFAULT_TRAVEL_DURATION * timingScale));
+
+  const actualLetterStagger = typeof options?.letterStagger === 'number'
+    ? options.letterStagger
+    : Math.max(2, Math.round(DEFAULT_LETTER_STAGGER * timingScale));
 
   const { chars, revert, granularity } = splitChars(element);
   if (chars.length === 0) {
@@ -126,10 +237,15 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
 
   registerIntro(element as HTMLElement, { cancel });
 
-  // Group words into chunks of chunkSize
-  const chunks: { words: HTMLElement[]; index: number }[] = [];
-  for (let i = 0; i < words.length; i += chunkSize) {
-    chunks.push({ words: words.slice(i, i + chunkSize), index: chunks.length });
+  // Measure and freeze groups at initialization (before hiding words or mutating slots)
+  const groups: ScrambleGroup[] = [];
+  if (revealBy === 'chunks') {
+    const actualChunkSize = Math.max(1, Math.floor(chunkSize));
+    for (let i = 0; i < words.length; i += actualChunkSize) {
+      groups.push({ words: words.slice(i, i + actualChunkSize), index: groups.length });
+    }
+  } else {
+    groups.push(...groupWordsByLine(words));
   }
 
   // Pre-hide all words so initial layout is fully reserved without collapsing.
@@ -193,42 +309,60 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
     }
   }
 
-  // Build the schedule of chunk events
-  const chunkEvents: { time: number; type: 'reveal' | 'corrupt' | 'heal'; chunkIndex: number }[] = [];
+  // Build the schedule of group events
+  const groupEvents: { time: number; type: 'reveal' | 'corrupt' | 'heal'; groupIndex: number }[] = [];
 
-  if (chunks.length <= 1 || granularity === 'word') {
-    for (let i = 0; i < chunks.length; i++) {
-      chunkEvents.push({ time: i * chunkDelay, type: 'reveal', chunkIndex: i });
-    }
-  } else {
-    for (let i = 0; i < chunks.length; i++) {
-      const revealTime = i * chunkDelay;
-      chunkEvents.push({ time: revealTime, type: 'reveal', chunkIndex: i });
+  // 1. Fast reveal schedule for each group (5x faster than effect cadence)
+  for (let i = 0; i < groups.length; i++) {
+    groupEvents.push({
+      time: i * revealTick,
+      type: 'reveal',
+      groupIndex: i,
+    });
+  }
 
-      if (i < chunks.length - 1) {
-        // Never corrupt the final chunk
-        const corruptTime = revealTime + corruptAfterChunks * chunkDelay;
-        chunkEvents.push({ time: corruptTime, type: 'corrupt', chunkIndex: i });
+  // 2. Slower corruption and healing schedule for eligible groups (including final group & single group)
+  if (granularity === 'char') {
+    for (let i = 0; i < groups.length; i++) {
+      const hasEligible = groups[i].words.some((w) => {
+        const wChars = Array.from(w.querySelectorAll<HTMLElement>('.wim-char'));
+        return wChars.some((wc) => {
+          const cd = charDataList.find((x) => x.slot === wc);
+          return cd && isEligible(cd.origText);
+        });
+      });
 
-        const hAfter = Array.isArray(healAfterChunks)
-          ? Math.floor(Math.random() * (healAfterChunks[1] - healAfterChunks[0] + 1)) + healAfterChunks[0]
-          : healAfterChunks;
+      if (!hasEligible) continue;
 
-        const healTime = corruptTime + hAfter * chunkDelay;
-        chunkEvents.push({ time: healTime, type: 'heal', chunkIndex: i });
-      }
+      // Ensure corruption occurs after reveal, running on the slower corruptionTick cadence
+      const corruptTime = Math.max(i * revealTick + revealTick, (i + corruptAfterChunks) * corruptionTick);
+
+      const hAfter = Array.isArray(healAfterChunks)
+        ? Math.floor(Math.random() * (healAfterChunks[1] - healAfterChunks[0] + 1)) + healAfterChunks[0]
+        : healAfterChunks;
+
+      const healTime = corruptTime + hAfter * corruptionTick;
+
+      groupEvents.push({ time: corruptTime, type: 'corrupt', groupIndex: i });
+      groupEvents.push({ time: healTime, type: 'heal', groupIndex: i });
     }
   }
 
-  chunkEvents.sort((a, b) => a.time - b.time);
+  groupEvents.sort((a, b) => a.time - b.time);
 
-  let chunksCompleted = 0;
-  const totalExpectedCompletions = chunkEvents.length;
+  let eventsCompleted = 0;
+  const totalExpectedCompletions = groupEvents.length;
 
   function onEventDone() {
-    chunksCompleted++;
-    if (chunksCompleted >= totalExpectedCompletions) {
+    eventsCompleted++;
+    if (eventsCompleted >= totalExpectedCompletions) {
       if (!isCanceled) {
+        // Guarantee all characters are restored to original text
+        charDataList.forEach((cd) => {
+          cd.current.textContent = cd.origText;
+          cd.incoming.style.visibility = 'hidden';
+          cd.incoming.textContent = '';
+        });
         if (revertOnFinish) {
           revert();
         }
@@ -282,10 +416,10 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
         const a1 = playAnim(
           cd.incoming,
           [{ transform: `translateX(${fromX})` }, { transform: 'translateX(0)' }],
-          { duration: travelDuration, easing, fill: 'forwards' }
+          { duration: actualTravelDuration, easing, fill: 'forwards' }
         );
 
-        const fadeTime = travelDuration * 0.6;
+        const fadeTime = actualTravelDuration * 0.6;
         const a2 = playAnim(cd.current, [{ opacity: 1 }, { opacity: 0 }], {
           duration: fadeTime,
           easing,
@@ -304,7 +438,7 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
             neighbour.slot.style.zIndex = '';
           }
           cd.slot.style.zIndex = '';
-        }, travelDuration);
+        }, actualTravelDuration);
       }
     }
 
@@ -313,19 +447,24 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
     }
   };
 
-  chunkEvents.forEach((ev) => {
+  groupEvents.forEach((ev) => {
     scheduleTimeout(() => {
-      const chunk = chunks[ev.chunkIndex];
+      const group = groups[ev.groupIndex];
 
       if (ev.type === 'reveal') {
-        // Complete chunk becomes visible instantly in its final position without any animation
-        chunk.words.forEach((w) => {
+        // Complete line or chunk becomes visible instantly in its final position without any animation
+        group.words.forEach((w) => {
           w.style.visibility = 'visible';
         });
         onEventDone();
       } else if (ev.type === 'corrupt' && granularity === 'char') {
+        // Defensive check: ensure group is visible before corrupting
+        group.words.forEach((w) => {
+          w.style.visibility = 'visible';
+        });
+
         const eligible: CharData[] = [];
-        for (const w of chunk.words) {
+        for (const w of group.words) {
           const wChars = Array.from(w.querySelectorAll<HTMLElement>('.wim-char'));
           const wordEligible = wChars
             .map((wc) => charDataList.find((x) => x.slot === wc))
@@ -349,14 +488,14 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
               cd.targetText = decoy;
               executeMutation(cd, decoy, corruptMode);
               if (i === toCorrupt.length - 1) {
-                scheduleTimeout(onEventDone, travelDuration);
+                scheduleTimeout(onEventDone, actualTravelDuration);
               }
-            }, i * letterStagger);
+            }, i * actualLetterStagger);
           });
         }
       } else if (ev.type === 'heal' && granularity === 'char') {
         const toHeal: CharData[] = [];
-        for (const w of chunk.words) {
+        for (const w of group.words) {
           const wChars = Array.from(w.querySelectorAll<HTMLElement>('.wim-char'));
           wChars.forEach((wc) => {
             const cd = charDataList.find((x) => x.slot === wc);
@@ -374,9 +513,9 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
               cd.targetText = cd.origText;
               executeMutation(cd, cd.origText, healMode);
               if (i === toHeal.length - 1) {
-                scheduleTimeout(onEventDone, travelDuration);
+                scheduleTimeout(onEventDone, actualTravelDuration);
               }
-            }, i * letterStagger);
+            }, i * actualLetterStagger);
           });
         }
       } else {
@@ -385,9 +524,21 @@ export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions
     }, ev.time);
   });
 
-  if (chunkEvents.length === 0) {
+  if (groupEvents.length === 0) {
     onEventDone();
   }
 
   return { finished, cancel };
 }
+
+/**
+ * Chunked or line-by-line reveal with typo corruption and healing intro animation.
+ *
+ * When `revealBy: 'lines'` (default), text reveals one rendered horizontal line at a time.
+ * When `revealBy: 'chunks'`, text reveals in word groups controlled by `chunkSize`.
+ * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
+ */
+export function chunkedScramble(target: Target, options?: ChunkedScrambleOptions): AnimationHandle {
+  return runAnimationWithTrigger(target, options, runSingleChunkedScramble, 'intro');
+}
+

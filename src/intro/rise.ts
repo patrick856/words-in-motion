@@ -1,8 +1,14 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro } from '../core/motion';
+import { prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro, normalizeDuration, runAnimationWithTrigger } from '../core/motion';
 import { splitChars, splitWords } from '../core/split';
 
 export interface RiseOptions extends BaseOptions {
+  /**
+   * Total target duration of the effect in milliseconds.
+   * Internal stagger and rise timings scale proportionally unless explicitly overridden.
+   * @default 800
+   */
+  duration?: number;
   /** Direction from which elements arrive. 'ground' starts below, 'ceiling' starts above. Defaults to 'ground'. */
   from?: 'ground' | 'ceiling';
   /** Distance in pixels for initial offset when not masked. Defaults to 30. */
@@ -15,25 +21,27 @@ export interface RiseOptions extends BaseOptions {
   fade?: boolean;
 }
 
-/**
- * Rise from ground / drop from ceiling intro animation.
- * Each word/character starts translated below (ground) or above (ceiling) its baseline and moves into place.
- */
-export function rise(target: Target, options?: RiseOptions): AnimationHandle {
-  const element = resolveElement(target);
-  if (!element) return createDummyHandle();
+const DEFAULT_DURATION = 800;
+const DEFAULT_STAGGER = 30;
+
+function runSingleRise(element: HTMLElement, options?: RiseOptions): AnimationHandle {
   if (prefersReducedMotion()) return createDummyHandle();
+
+  const duration = normalizeDuration(options?.duration, DEFAULT_DURATION);
+  const timingScale = duration / DEFAULT_DURATION;
 
   const {
     from = 'ground',
     distance = 30,
-    duration = 600,
-    stagger = 30,
     easing = 'cubic-bezier(0.16, 1, 0.3, 1)',
     by = 'words',
     mask = true,
     revertOnFinish = true,
   } = options || {};
+
+  const actualStagger = typeof options?.stagger === 'number'
+    ? Math.max(0, options.stagger)
+    : Math.max(5, Math.round(DEFAULT_STAGGER * timingScale));
 
   const fade = options?.fade ?? (mask ? false : true);
 
@@ -94,7 +102,7 @@ export function rise(target: Target, options?: RiseOptions): AnimationHandle {
 
         const anim = unit.animate(keyframes, {
           duration,
-          delay: index * stagger,
+          delay: index * actualStagger,
           easing,
           fill: 'forwards',
         });
@@ -123,7 +131,7 @@ export function rise(target: Target, options?: RiseOptions): AnimationHandle {
 
         const anim = unit.animate(keyframes, {
           duration,
-          delay: index * stagger,
+          delay: index * actualStagger,
           easing,
           fill: 'forwards',
         });
@@ -145,3 +153,13 @@ export function rise(target: Target, options?: RiseOptions): AnimationHandle {
 
   return { finished, cancel };
 }
+
+/**
+ * Rise from ground / drop from ceiling intro animation.
+ * Each word/character starts translated below (ground) or above (ceiling) its baseline and moves into place.
+ * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
+ */
+export function rise(target: Target, options?: RiseOptions): AnimationHandle {
+  return runAnimationWithTrigger(target, options, runSingleRise, 'intro');
+}
+

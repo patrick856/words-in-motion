@@ -1,30 +1,38 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro } from '../core/motion';
+import { prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro, normalizeDuration, runAnimationWithTrigger } from '../core/motion';
 import { splitChars, splitWords } from '../core/split';
 
 export interface LampFlickerOptions extends BaseOptions {
+  /**
+   * Total target duration of the effect in milliseconds.
+   * Internal keyframes and stagger timings scale proportionally unless explicitly overridden.
+   * @default 1200
+   */
+  duration?: number;
   /** Number of flicker toggles before stabilizing. Defaults to 4. */
   flickers?: number;
   /** Split granularity. Defaults to 'all'. */
   by?: 'all' | 'words' | 'chars';
 }
 
-/**
- * Lamp flicker-in intro animation.
- * Text flickers at irregular intervals (mimicking a bulb warming up) before settling visible.
- */
-export function lampFlicker(target: Target, options?: LampFlickerOptions): AnimationHandle {
-  const element = resolveElement(target);
-  if (!element) return createDummyHandle();
+const DEFAULT_DURATION = 1200;
+const DEFAULT_STAGGER = 50;
+
+function runSingleLampFlicker(element: HTMLElement, options?: LampFlickerOptions): AnimationHandle {
   if (prefersReducedMotion()) return createDummyHandle();
+
+  const duration = normalizeDuration(options?.duration, DEFAULT_DURATION);
+  const timingScale = duration / DEFAULT_DURATION;
 
   const {
     flickers = 4,
-    duration = 800,
-    stagger = 50,
     by = 'all',
     revertOnFinish = true,
   } = options || {};
+
+  const actualStagger = typeof options?.stagger === 'number'
+    ? Math.max(0, options.stagger)
+    : Math.max(5, Math.round(DEFAULT_STAGGER * timingScale));
 
   let units: HTMLElement[] = [];
   let revert = () => {};
@@ -80,7 +88,7 @@ export function lampFlicker(target: Target, options?: LampFlickerOptions): Anima
 
       const anim = unit.animate(keyframes, {
         duration,
-        delay: by === 'all' ? 0 : index * stagger,
+        delay: by === 'all' ? 0 : index * actualStagger,
         easing: 'linear',
         fill: 'forwards',
       });
@@ -100,3 +108,13 @@ export function lampFlicker(target: Target, options?: LampFlickerOptions): Anima
 
   return { finished, cancel };
 }
+
+/**
+ * Lamp flicker-in intro animation.
+ * Text flickers at irregular intervals (mimicking a bulb warming up) before settling visible.
+ * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
+ */
+export function lampFlicker(target: Target, options?: LampFlickerOptions): AnimationHandle {
+  return runAnimationWithTrigger(target, options, runSingleLampFlicker, 'intro');
+}
+

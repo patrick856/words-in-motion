@@ -1,8 +1,14 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro } from '../core/motion';
+import { prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro, normalizeDuration, runAnimationWithTrigger } from '../core/motion';
 import { splitChars, splitWords } from '../core/split';
 
 export interface DirectionalRevealOptions extends BaseOptions {
+  /**
+   * Total target duration of the effect in milliseconds.
+   * Internal stagger and settle timings scale proportionally unless explicitly overridden.
+   * @default 900
+   */
+  duration?: number;
   /** Reveal direction ordering across elements. Defaults to 'left-to-right'. */
   direction?: 'left-to-right' | 'right-to-left' | 'center-out' | 'edges-in';
   /** Split granularity. Defaults to 'chars'. */
@@ -17,14 +23,16 @@ export interface DirectionalRevealOptions extends BaseOptions {
   settleDuration?: number;
 }
 
-/**
- * Directional reveal intro animation.
- * Reveals text word-by-word or char-by-char sliding in directionally or dropping from above.
- */
-export function directionalReveal(target: Target, options?: DirectionalRevealOptions): AnimationHandle {
-  const element = resolveElement(target);
-  if (!element) return createDummyHandle();
+const DEFAULT_DURATION = 900;
+const DEFAULT_STAGGER = 40;
+const DEFAULT_SETTLE_DURATION = 260;
+const DEFAULT_APPEAR_DURATION = 150;
+
+function runSingleDirectionalReveal(element: HTMLElement, options?: DirectionalRevealOptions): AnimationHandle {
   if (prefersReducedMotion()) return createDummyHandle();
+
+  const duration = normalizeDuration(options?.duration, DEFAULT_DURATION);
+  const timingScale = duration / DEFAULT_DURATION;
 
   const {
     direction = 'left-to-right',
@@ -32,12 +40,20 @@ export function directionalReveal(target: Target, options?: DirectionalRevealOpt
     dropIn = false,
     dropDistance = 20,
     dropStyle = 'settle-on-next',
-    settleDuration = 260,
-    duration = 600,
-    stagger = 40,
     easing = 'cubic-bezier(0.16, 1, 0.3, 1)',
     revertOnFinish = true,
   } = options || {};
+
+  const actualStagger = typeof options?.stagger === 'number'
+    ? Math.max(0, options.stagger)
+    : Math.max(5, Math.round(DEFAULT_STAGGER * timingScale));
+
+  const actualSettleDuration = typeof options?.settleDuration === 'number'
+    ? Math.max(10, options.settleDuration)
+    : Math.max(20, Math.round(DEFAULT_SETTLE_DURATION * timingScale));
+
+  const actualAppearDuration = Math.max(20, Math.round(DEFAULT_APPEAR_DURATION * timingScale));
+  const actualUnitDuration = Math.max(50, Math.round(600 * timingScale));
 
   const splitResult = by === 'words' ? splitWords(element) : splitChars(element);
   const units: HTMLElement[] = 'words' in splitResult ? splitResult.words : splitResult.chars;
@@ -102,7 +118,7 @@ export function directionalReveal(target: Target, options?: DirectionalRevealOpt
         const midTransform = `translate3d(0, -${dropDistance}px, 0)`;
         const finalTransform = `translate3d(0, 0, 0)`;
         
-        const delay = Math.max(0, staggerIndex * stagger);
+        const delay = Math.max(0, staggerIndex * actualStagger);
         
         const t1 = setTimeout(() => {
           if (isCanceled) return;
@@ -112,14 +128,14 @@ export function directionalReveal(target: Target, options?: DirectionalRevealOpt
               { opacity: 0, transform: startTransform },
               { opacity: 1, transform: midTransform }
             ],
-            { duration: 150, easing, fill: 'forwards' }
+            { duration: actualAppearDuration, easing, fill: 'forwards' }
           );
           animations.add(a1);
           a1.onfinish = () => animations.delete(a1);
         }, delay);
         timeouts.add(t1);
 
-        const settleDelay = Math.max(0, (staggerIndex + 1) * stagger);
+        const settleDelay = Math.max(0, (staggerIndex + 1) * actualStagger);
         const t2 = setTimeout(() => {
           if (isCanceled) return;
           const a2 = unit.animate(
@@ -127,7 +143,7 @@ export function directionalReveal(target: Target, options?: DirectionalRevealOpt
               { transform: midTransform },
               { transform: finalTransform }
             ],
-            { duration: settleDuration, easing, fill: 'forwards' }
+            { duration: actualSettleDuration, easing, fill: 'forwards' }
           );
           animations.add(a2);
           a2.onfinish = () => {
@@ -149,7 +165,7 @@ export function directionalReveal(target: Target, options?: DirectionalRevealOpt
             { opacity: 0, transform: startTransform },
             { opacity: 1, transform: 'translate3d(0, 0, 0)' }
           ],
-          { duration, delay: Math.max(0, staggerIndex * stagger), easing, fill: 'forwards' }
+          { duration: actualUnitDuration, delay: Math.max(0, staggerIndex * actualStagger), easing, fill: 'forwards' }
         );
         animations.add(anim);
         anim.onfinish = () => {
@@ -165,3 +181,13 @@ export function directionalReveal(target: Target, options?: DirectionalRevealOpt
 
   return { finished, cancel };
 }
+
+/**
+ * Directional reveal intro animation.
+ * Reveals text word-by-word or char-by-char sliding in directionally or dropping from above.
+ * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
+ */
+export function directionalReveal(target: Target, options?: DirectionalRevealOptions): AnimationHandle {
+  return runAnimationWithTrigger(target, options, runSingleDirectionalReveal, 'intro');
+}
+

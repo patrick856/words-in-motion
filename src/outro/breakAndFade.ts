@@ -1,5 +1,5 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle } from '../core/motion';
+import { prefersReducedMotion, createDummyHandle, runAnimationWithTrigger } from '../core/motion';
 import { splitChars } from '../core/split';
 
 export interface BreakAndFadeOptions extends BaseOptions {
@@ -9,18 +9,12 @@ export interface BreakAndFadeOptions extends BaseOptions {
   keep?: boolean;
 }
 
-/**
- * Break-and-fade sweep outro animation.
- * Sweeps a visible samurai slash streak across text, triggering a sharp fracture displacement and fade on each character.
- * NOTE: Single-line text only.
- */
-export function breakAndFade(
-  target: Target,
+function runSingleBreakAndFade(
+  element: HTMLElement,
   options?: BreakAndFadeOptions
 ): AnimationHandle {
-  const element = resolveElement(target);
-  if (!element || prefersReducedMotion()) {
-    if (element) element.style.opacity = '0';
+  if (prefersReducedMotion()) {
+    element.style.opacity = '0';
     return createDummyHandle();
   }
 
@@ -129,3 +123,17 @@ export function breakAndFade(
 
   return { finished, cancel };
 }
+
+/**
+ * Break-and-fade sweep outro animation.
+ * Sweeps a visible samurai slash streak across text, triggering a sharp fracture displacement and fade on each character.
+ * NOTE: Single-line text only.
+ * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
+ */
+export function breakAndFade(
+  target: Target,
+  options?: BreakAndFadeOptions
+): AnimationHandle {
+  return runAnimationWithTrigger(target, options, runSingleBreakAndFade, 'outro');
+}
+

@@ -22,5 +22,8 @@ export function fontWeight(
   return createInteraction(target, options, ({ char, progress }) => {
     const currentWeight = Math.round(lerp(minWeight, maxWeight, progress));
     char.style.fontWeight = String(currentWeight);
+    return {
+      fontWeight: currentWeight,
+    };
   });
 }

@@ -1,8 +1,13 @@
 /**
  * Target element(s) for animation functions.
- * Can be a CSS selector string or an HTMLElement instance.
+ * Can be a CSS selector string, an HTMLElement instance, an array of elements, or a NodeList.
  */
-export type Target = string | HTMLElement;
+export type Target =
+  | string
+  | HTMLElement
+  | (HTMLElement | null | undefined)[]
+  | NodeListOf<HTMLElement>
+  | HTMLCollectionOf<HTMLElement>;
 
 /**
  * Handle returned by intro, loop, and outro animation functions in words-in-motion.
@@ -20,6 +25,8 @@ export interface AnimationHandle {
 export interface InteractHandle {
   /** Completely destroys the interaction, removes all listeners and observers, and reverts DOM changes. */
   destroy: () => void;
+  /** Alias for destroy() to support unified cancellation syntax across all animation handles. */
+  cancel?: () => void;
   /** Pauses the interaction loop and updates. */
   pause: () => void;
   /** Resumes the interaction loop and updates. */
@@ -51,9 +58,37 @@ export interface ScrollScrubHandle {
 }
 
 /**
+ * Options controlling scroll-based activation of intro, outro, and trigger animations.
+ */
+export interface TriggerOptions {
+  /**
+   * Animation trigger mode:
+   * - 'immediate': runs as soon as called (default).
+   * - 'enter': starts when element reaches `start` scroll position.
+   * - 'leave': starts when element reaches `start` scroll position while leaving viewport.
+   * @default 'immediate'
+   */
+  trigger?: 'immediate' | 'enter' | 'leave';
+
+  /**
+   * Scroll trigger position string in format "[element anchor] [viewport anchor]".
+   * Supported element anchors: 'top', 'center', 'bottom'.
+   * Supported viewport anchors: 'top', 'center', 'bottom', percentage (e.g. '80%'), or pixels (e.g. '100px').
+   * Defaults to "top 80%" for enter, "bottom 20%" for leave.
+   */
+  start?: string;
+
+  /**
+   * Whether the animation triggers only once (true) or can re-trigger when re-crossing the threshold (false).
+   * @default true
+   */
+  once?: boolean;
+}
+
+/**
  * Common options accepted by typographic animation functions.
  */
-export interface BaseOptions {
+export interface BaseOptions extends TriggerOptions {
   /** Total animation duration in milliseconds. Defaults vary by animation. */
   duration?: number;
   /** Initial delay before starting the animation in milliseconds. */
@@ -84,6 +119,13 @@ export interface BaseInteractOptions {
   touch?: 'follow' | 'tap' | 'none';
   /** Whether to respect user prefers-reduced-motion preference. Defaults to true. */
   respectReducedMotion?: boolean;
+  /**
+   * Pointer activation area.
+   * - 'viewport': pointer is tracked globally; characters react when within radius anywhere in viewport (default).
+   * - 'target': pointer is only active while inside the target element's bounding box.
+   * @default 'viewport'
+   */
+  pointerArea?: 'viewport' | 'target';
 }
 
 /**
@@ -117,3 +159,9 @@ export interface BaseScrollScrubOptions extends BaseScrollOptions {
   /** Smoothing lerp factor for scrub progress (0..1). 1 means instant scroll tracking. Defaults to 1. */
   smooth?: number;
 }
+
+/**
+ * Options accepted by scroll scrub animations (progress tied directly to scroll position).
+ */
+export type ScrollScrubOptions = BaseScrollScrubOptions;
+

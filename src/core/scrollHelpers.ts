@@ -6,10 +6,9 @@ import type {
   ScrollTriggerHandle,
   Target,
 } from './types';
-import { resolveElement, prefersReducedMotion } from './motion';
+import { resolveElements, prefersReducedMotion } from './motion';
 import { splitChars } from './split';
-import { subscribeInView } from './inview';
-import { subscribeScrollScrub } from './scroll';
+import { subscribeScrollScrub, subscribeScrollTrigger } from './scroll';
 import { lerp } from './math';
 
 export interface ScrollScrubUpdateContext {
@@ -55,22 +54,13 @@ function createDummyScrubHandle(): ScrollScrubHandle {
   };
 }
 
-/**
- * Foundation factory for creating trigger-mode scroll animations (plays when element enters viewport).
- */
-export function createScrollTrigger(
-  target: Target,
+function createSingleScrollTrigger(
+  element: HTMLElement,
   options?: BaseScrollTriggerOptions,
   play?: ScrollTriggerPlayCallback
 ): ScrollTriggerHandle {
-  const element = resolveElement(target);
-  if (!element) {
-    return createDummyTriggerHandle();
-  }
-
   const opts: BaseScrollTriggerOptions = {
     start: 'top 80%',
-    end: 'top 20%',
     once: true,
     repeat: false,
     respectReducedMotion: true,
@@ -81,7 +71,6 @@ export function createScrollTrigger(
   const isReducedMotion = opts.respectReducedMotion !== false && prefersReducedMotion();
 
   let activeAnimation: AnimationHandle | null = null;
-  let hasTriggered = false;
   let finishedResolve: () => void = () => {};
 
   const finishedPromise = new Promise<void>((resolve) => {
@@ -101,31 +90,29 @@ export function createScrollTrigger(
 
     if (play) {
       activeAnimation = play(element);
-      activeAnimation.finished.then(() => {
-        finishedResolve();
-      }).catch(() => {});
+      activeAnimation.finished
+        .then(() => {
+          finishedResolve();
+        })
+        .catch(() => {});
     } else {
       finishedResolve();
     }
   };
 
-  let unsubscribeInView: () => void = () => {};
-  unsubscribeInView = subscribeInView(
+  const unsubscribeTrigger = subscribeScrollTrigger({
     element,
-    (isIntersecting) => {
-      if (isIntersecting) {
-        if (isOnce && hasTriggered) return;
-
-        hasTriggered = true;
-        triggerAnimation();
-
-        if (isOnce) {
-          unsubscribeInView();
-        }
+    trigger: 'enter',
+    start: opts.start,
+    once: isOnce,
+    onTrigger: triggerAnimation,
+    onReset: () => {
+      if (activeAnimation) {
+        activeAnimation.cancel();
+        activeAnimation = null;
       }
     },
-    { threshold: opts.threshold ?? 0 }
-  );
+  });
 
   const cancel = () => {
     if (activeAnimation) {
@@ -136,7 +123,7 @@ export function createScrollTrigger(
 
   const destroy = () => {
     cancel();
-    unsubscribeInView();
+    unsubscribeTrigger();
   };
 
   return {
@@ -147,18 +134,35 @@ export function createScrollTrigger(
 }
 
 /**
- * Foundation factory for creating scrub-mode scroll animations (progress directly tied to scroll position).
+ * Foundation factory for creating trigger-mode scroll animations (plays when element reaches viewport scroll position).
  */
-export function createScrollScrub(
+export function createScrollTrigger(
   target: Target,
+  options?: BaseScrollTriggerOptions,
+  play?: ScrollTriggerPlayCallback
+): ScrollTriggerHandle {
+  const elements = resolveElements(target);
+  if (elements.length === 0) {
+    return createDummyTriggerHandle();
+  }
+
+  if (elements.length === 1) {
+    return createSingleScrollTrigger(elements[0], options, play);
+  }
+
+  const handles = elements.map((el) => createSingleScrollTrigger(el, options, play));
+  return {
+    finished: Promise.all(handles.map((h) => h.finished)).then(() => {}),
+    cancel: () => handles.forEach((h) => h.cancel()),
+    destroy: () => handles.forEach((h) => h.destroy()),
+  };
+}
+
+function createSingleScrollScrub(
+  element: HTMLElement,
   options?: BaseScrollScrubOptions,
   update?: ScrollScrubUpdateCallback
 ): ScrollScrubHandle {
-  const element = resolveElement(target);
-  if (!element) {
-    return createDummyScrubHandle();
-  }
-
   const opts: BaseScrollScrubOptions = {
     start: 'top 80%',
     end: 'top 20%',
@@ -274,5 +278,30 @@ export function createScrollScrub(
     destroy,
     pause,
     resume,
+  };
+}
+
+/**
+ * Foundation factory for creating scrub-mode scroll animations (progress directly tied to scroll position).
+ */
+export function createScrollScrub(
+  target: Target,
+  options?: BaseScrollScrubOptions,
+  update?: ScrollScrubUpdateCallback
+): ScrollScrubHandle {
+  const elements = resolveElements(target);
+  if (elements.length === 0) {
+    return createDummyScrubHandle();
+  }
+
+  if (elements.length === 1) {
+    return createSingleScrollScrub(elements[0], options, update);
+  }
+
+  const handles = elements.map((el) => createSingleScrollScrub(el, options, update));
+  return {
+    destroy: () => handles.forEach((h) => h.destroy()),
+    pause: () => handles.forEach((h) => h.pause()),
+    resume: () => handles.forEach((h) => h.resume()),
   };
 }

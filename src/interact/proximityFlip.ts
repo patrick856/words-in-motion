@@ -23,6 +23,8 @@ export function proximityFlip(
     const transform = axis === 'X' ? `rotateX(${angleDeg.toFixed(1)}deg)` : `rotateY(${angleDeg.toFixed(1)}deg)`;
 
     return {
+      rotateX: axis === 'X' ? angleDeg : undefined,
+      rotateY: axis === 'Y' ? angleDeg : undefined,
       transform,
     };
   });

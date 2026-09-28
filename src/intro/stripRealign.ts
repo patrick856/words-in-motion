@@ -1,12 +1,21 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro } from '../core/motion';
+import { prefersReducedMotion, createDummyHandle, registerIntro, unregisterIntro, normalizeDuration, runAnimationWithTrigger } from '../core/motion';
 
 export interface StripRealignOptions extends BaseOptions {
+  /**
+   * Total target duration of the effect in milliseconds.
+   * Strip delays and individual puzzle movement durations scale proportionally.
+   * @default 1400
+   */
+  duration?: number;
   /** Number of horizontal strips per line. Defaults to 4. */
   strips?: number;
   /** Maximum horizontal displacement in pixels. Defaults to 35. */
   maxOffset?: number;
 }
+
+const DEFAULT_DURATION = 1400;
+const DEFAULT_MAX_DELAY = 120;
 
 function generatePuzzleIntroKeyframes(maxOffset: number): Keyframe[] {
   const sign = Math.random() < 0.5 ? -1 : 1;
@@ -35,19 +44,16 @@ function generatePuzzleIntroKeyframes(maxOffset: number): Keyframe[] {
   ];
 }
 
-/**
- * Strip realign intro animation.
- * Slices each line of text into horizontal puzzle strips enclosed in display boxes
- * so when any strip slides out past the boundary it is clipped and hidden.
- */
-export function stripRealign(target: Target, options?: StripRealignOptions): AnimationHandle {
-  const element = resolveElement(target);
-  if (!element || prefersReducedMotion()) return createDummyHandle();
+function runSingleStripRealign(element: HTMLElement, options?: StripRealignOptions): AnimationHandle {
+  if (prefersReducedMotion()) return createDummyHandle();
+
+  const duration = normalizeDuration(options?.duration, DEFAULT_DURATION);
+  const timingScale = duration / DEFAULT_DURATION;
+  const actualMaxDelay = Math.round(DEFAULT_MAX_DELAY * timingScale);
 
   const {
     strips = 4,
     maxOffset = 35,
-    duration = 650,
     revertOnFinish = true,
   } = options || {};
 
@@ -236,7 +242,7 @@ export function stripRealign(target: Target, options?: StripRealignOptions): Ani
       lineContainer.appendChild(stripWrapper);
 
       const keyframes = generatePuzzleIntroKeyframes(maxOffset);
-      const stripDelay = Math.random() * 120;
+      const stripDelay = Math.random() * actualMaxDelay;
       const stripDuration = duration * (0.8 + Math.random() * 0.4);
 
       if (typeof stripWrapper.animate === 'function') {
@@ -282,3 +288,14 @@ export function stripRealign(target: Target, options?: StripRealignOptions): Ani
 
   return { finished, cancel };
 }
+
+/**
+ * Strip realign intro animation.
+ * Slices each line of text into horizontal puzzle strips enclosed in display boxes
+ * so when any strip slides out past the boundary it is clipped and hidden.
+ * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
+ */
+export function stripRealign(target: Target, options?: StripRealignOptions): AnimationHandle {
+  return runAnimationWithTrigger(target, options, runSingleStripRealign, 'intro');
+}
+

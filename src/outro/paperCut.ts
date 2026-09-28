@@ -1,5 +1,5 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle } from '../core/motion';
+import { prefersReducedMotion, createDummyHandle, runAnimationWithTrigger } from '../core/motion';
 
 export interface PaperCutOptions extends BaseOptions {
   /** Number of horizontal strips per line. Defaults to 4. */
@@ -41,18 +41,12 @@ function generatePuzzleOutroKeyframes(maxOffset: number): Keyframe[] {
   ];
 }
 
-/**
- * Paper cut outro animation.
- * The reverse counterpart to strip realign: slices each line of text into horizontal
- * puzzle strips enclosed in display boxes so strips exiting the box are clipped and not visible.
- */
-export function paperCut(
-  target: Target,
+function runSinglePaperCut(
+  element: HTMLElement,
   options?: PaperCutOptions
 ): AnimationHandle {
-  const element = resolveElement(target);
-  if (!element || prefersReducedMotion()) {
-    if (element) element.style.opacity = '0';
+  if (prefersReducedMotion()) {
+    element.style.opacity = '0';
     return createDummyHandle();
   }
 
@@ -272,3 +266,16 @@ export function paperCut(
 
   return { finished, cancel };
 }
+
+/**
+ * Paper cut outro animation.
+ * Slices each line of text into horizontal puzzle strips enclosed in display boxes so strips exiting the box are clipped.
+ * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
+ */
+export function paperCut(
+  target: Target,
+  options?: PaperCutOptions
+): AnimationHandle {
+  return runAnimationWithTrigger(target, options, runSinglePaperCut, 'outro');
+}
+

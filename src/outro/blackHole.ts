@@ -1,5 +1,5 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle } from '../core/motion';
+import { prefersReducedMotion, createDummyHandle, runAnimationWithTrigger } from '../core/motion';
 import { splitChars, splitWords } from '../core/split';
 
 export interface BlackHoleOptions extends BaseOptions {
@@ -9,18 +9,10 @@ export interface BlackHoleOptions extends BaseOptions {
   keep?: boolean;
 }
 
-/**
- * Black hole collapse outro animation.
- * Words/characters converge toward a central point while scaling down to 0 opacity.
- */
-export function blackHole(
-  target: Target,
+function runSingleBlackHole(
+  element: HTMLElement,
   options?: BlackHoleOptions
 ): AnimationHandle {
-  const element = resolveElement(target);
-  if (!element) {
-    return createDummyHandle();
-  }
 
   if (prefersReducedMotion()) {
     element.style.opacity = '0';
@@ -90,3 +82,16 @@ export function blackHole(
 
   return { finished, cancel };
 }
+
+/**
+ * Black hole collapse outro animation.
+ * Words/characters converge toward a central point while scaling down to 0 opacity.
+ * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
+ */
+export function blackHole(
+  target: Target,
+  options?: BlackHoleOptions
+): AnimationHandle {
+  return runAnimationWithTrigger(target, options, runSingleBlackHole, 'outro');
+}
+

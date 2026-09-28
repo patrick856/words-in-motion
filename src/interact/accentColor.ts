@@ -39,13 +39,15 @@ export function accentColor(
   return createInteraction(target, options, ({ char, progress }) => {
     if (progress <= 0) {
       char.style.color = '';
-      return;
+      return { color: '' };
     }
 
     const r = Math.round(lerp(baseRgb.r, targetRgb.r, progress));
     const g = Math.round(lerp(baseRgb.g, targetRgb.g, progress));
     const b = Math.round(lerp(baseRgb.b, targetRgb.b, progress));
 
-    char.style.color = `rgb(${r}, ${g}, ${b})`;
+    const color = `rgb(${r}, ${g}, ${b})`;
+    char.style.color = color;
+    return { color };
   });
 }

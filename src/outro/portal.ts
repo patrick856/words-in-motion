@@ -1,5 +1,5 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { resolveElement, prefersReducedMotion, createDummyHandle } from '../core/motion';
+import { prefersReducedMotion, createDummyHandle, runAnimationWithTrigger } from '../core/motion';
 
 export interface PortalOptions extends BaseOptions {
   /** Animation duration in milliseconds. Defaults to 2500ms. */
@@ -10,19 +10,12 @@ export interface PortalOptions extends BaseOptions {
   keep?: boolean;
 }
 
-/**
- * Portal outro animation.
- * Continuously glides text through a multiline portal wormhole in real time:
- * text sliding out of the left end of each line simultaneously emerges from the
- * right end of the line above it, with the first line exiting the final portal.
- */
-export function portal(
-  target: Target,
+function runSinglePortal(
+  element: HTMLElement,
   options?: PortalOptions
 ): AnimationHandle {
-  const element = resolveElement(target);
-  if (!element || prefersReducedMotion()) {
-    if (element) element.style.opacity = '0';
+  if (prefersReducedMotion()) {
+    element.style.opacity = '0';
     return createDummyHandle();
   }
 
@@ -212,6 +205,21 @@ export function portal(
 
   return { finished, cancel };
 }
+
+/**
+ * Portal outro animation.
+ * Continuously glides text through a multiline portal wormhole in real time:
+ * text sliding out of the left end of each line simultaneously emerges from the
+ * right end of the line above it, with the first line exiting the final portal.
+ * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
+ */
+export function portal(
+  target: Target,
+  options?: PortalOptions
+): AnimationHandle {
+  return runAnimationWithTrigger(target, options, runSinglePortal, 'outro');
+}
+
 
 
 
