@@ -1,42 +1,15 @@
 import type { BaseInteractOptions, InteractHandle, Target } from '../core/types';
 import { createInteraction } from '../core/interact';
-
+import { bounded } from '../core/effect';
 export interface ObstaclePushOptions extends BaseInteractOptions {
-  /** Radius of the solid cursor obstacle body in pixels. Defaults to 35. */
+  /** Contact radius in CSS pixels. Default 0: only the cursor tip touches letters. */
   cursorRadius?: number;
 }
-
-/**
- * Cursor-as-obstacle physical push interact effect.
- * Treats the cursor as a solid physical body on the same visual plane.
- * When the cursor hits/touches characters, it physically pushes them aside along the collision vector, and characters spring back when cleared.
- */
-export function obstaclePush(
-  target: Target,
-  options?: ObstaclePushOptions
-): InteractHandle {
-  const cursorRadius = options?.cursorRadius ?? 35;
-
-  return createInteraction(target, options, ({ dx, dy, distance: dist }) => {
-    // If cursor circle collides with character center
-    if (dist > 0 && dist < cursorRadius) {
-      const overlap = cursorRadius - dist;
-      const nx = dx / dist;
-      const ny = dy / dist;
-
-      // Physically displace character along collision vector out of the cursor body
-      const translateX = -nx * overlap;
-      const translateY = -ny * overlap;
-
-      return {
-        translateX,
-        translateY,
-      };
-    }
-
-    return {
-      translateX: 0,
-      translateY: 0,
-    };
-  });
+/** A solid 2D cursor pushes letters and their neighbors; each letter springs home afterward. */
+export function obstaclePush(target: Target, options?: ObstaclePushOptions): InteractHandle {
+  const radius = bounded(options?.cursorRadius, 0, 0, 500);
+  return createInteraction(target, options, ({ options: opts }) => ({
+    collide: true,
+    cursorObstacle: opts.strength > 0 ? radius : undefined,
+  }));
 }

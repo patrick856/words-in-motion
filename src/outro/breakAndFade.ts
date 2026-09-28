@@ -1,139 +1,42 @@
 import type { AnimationHandle, BaseOptions, Target } from '../core/types';
-import { prefersReducedMotion, createDummyHandle, runAnimationWithTrigger } from '../core/motion';
-import { splitChars } from '../core/split';
-
+import { runAnimationWithTrigger } from '../core/motion';
+import { bounded } from '../core/effect';
+import { outro } from './shared';
 export interface BreakAndFadeOptions extends BaseOptions {
-  /** Sweep duration across text in milliseconds. Defaults to 400. */
+  /** Time allotted to the reading-order fracture sweep. Defaults to 240ms. */
   sweepDuration?: number;
-  /** Whether to keep text hidden or restore original state after completion. Defaults to false. */
   keep?: boolean;
 }
-
-function runSingleBreakAndFade(
-  element: HTMLElement,
-  options?: BreakAndFadeOptions
-): AnimationHandle {
-  if (prefersReducedMotion()) {
-    element.style.opacity = '0';
-    return createDummyHandle();
-  }
-
-  const {
-    duration = 800,
-    sweepDuration = 400,
-    keep = false,
-  } = options || {};
-
-  const originalAriaLabel = element.getAttribute('aria-label');
-  const text = element.textContent || '';
-
-  if (!originalAriaLabel) {
-    element.setAttribute('aria-label', text);
-  }
-
-  element.style.position = 'relative';
-
-  const splitResult = splitChars(element);
-  const chars = splitResult.chars;
-
-  if (chars.length === 0) {
-    return createDummyHandle();
-  }
-
-  // Samurai slash line element
-  const slashLine = document.createElement('div');
-  slashLine.style.position = 'absolute';
-  slashLine.style.top = '-10px';
-  slashLine.style.bottom = '-10px';
-  slashLine.style.width = '3px';
-  slashLine.style.backgroundColor = '#ffffff';
-  slashLine.style.boxShadow = '0 0 12px #38bdf8, 0 0 22px #0284c7, 0 0 35px #0284c7';
-  slashLine.style.transform = 'skewX(-25deg)';
-  slashLine.style.zIndex = '50';
-  slashLine.style.pointerEvents = 'none';
-  element.appendChild(slashLine);
-
-  const animations: Animation[] = [];
-
-  if (typeof slashLine.animate === 'function') {
-    const lineAnim = slashLine.animate(
-      [
-        { left: '-5%', opacity: 1 },
-        { left: '105%', opacity: 0 },
-      ],
-      {
-        duration: sweepDuration,
-        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-        fill: 'forwards',
-      }
-    );
-    animations.push(lineAnim);
-  }
-
-  const charStagger = chars.length > 1 ? sweepDuration / (chars.length - 1) : 0;
-
-  chars.forEach((charEl, index) => {
-    const slashShiftX = (index % 2 === 0 ? 1 : -1) * (14 + Math.random() * 8);
-    const slashShiftY = (Math.random() - 0.5) * 12;
-    const rotate = (index % 2 === 0 ? 1 : -1) * 22;
-
-    if (typeof charEl.animate === 'function') {
-      const anim = charEl.animate(
-        [
-          { opacity: 1, transform: 'translate3d(0, 0, 0) rotate(0deg)' },
-          { opacity: 1, transform: `translate3d(${slashShiftX}px, ${slashShiftY}px, 0) rotate(${rotate}deg)`, offset: 0.3 },
-          { opacity: 0, transform: `translate3d(${slashShiftX * 1.8}px, ${slashShiftY + 25}px, 0) rotate(${rotate * 1.5}deg)`, offset: 1 },
-        ],
-        {
-          duration: duration - sweepDuration + 300,
-          delay: index * charStagger,
-          easing: 'cubic-bezier(0.2, 0, 0.8, 1)',
-          fill: 'forwards',
-        }
-      );
-      animations.push(anim);
-    }
-  });
-
-  const revert = () => {
-    if (slashLine.parentNode) {
-      slashLine.parentNode.removeChild(slashLine);
-    }
-    splitResult.revert();
-    element.style.position = '';
-    if (originalAriaLabel === null) {
-      element.removeAttribute('aria-label');
-    } else {
-      element.setAttribute('aria-label', originalAriaLabel);
-    }
-  };
-
-  const finished = Promise.all(animations.map((a) => a.finished)).then(() => {
-    if (!keep) {
-      element.style.opacity = '0';
-    }
-    revert();
-  });
-
-  const cancel = () => {
-    animations.forEach((a) => a.cancel());
-    revert();
-    element.style.opacity = '';
-  };
-
-  return { finished, cancel };
+/** A reading-order fracture with restrained alternating displacement, suitable for wrapped text. */
+export function breakAndFade(target: Target, options?: BreakAndFadeOptions): AnimationHandle {
+  return runAnimationWithTrigger(
+    target,
+    options,
+    (element, opts) =>
+      outro(element, opts, 'chars', 850, (unit, i, total, animate) => {
+        const sign = i % 2 ? -1 : 1;
+        const phase =
+          ((bounded(opts?.sweepDuration, 240, 0, 2000) / bounded(opts?.duration, 850, 10, 60000)) *
+            10 *
+            i) /
+          Math.max(1, total - 1);
+        animate(
+          unit,
+          [
+            { opacity: 1, transform: 'translate3d(0,0,0) rotate(0deg)' },
+            {
+              offset: 0.28,
+              opacity: 1,
+              transform: `translate3d(${sign * 0.055}em,-0.025em,0) rotate(${sign * 3}deg)`,
+            },
+            {
+              opacity: 0,
+              transform: `translate3d(${sign * 0.22}em,0.35em,0) rotate(${sign * 12}deg)`,
+            },
+          ],
+          phase
+        );
+      }),
+    'outro'
+  );
 }
-
-/**
- * Break-and-fade sweep outro animation.
- * Sweeps a visible samurai slash streak across text, triggering a sharp fracture displacement and fade on each character.
- * NOTE: Single-line text only.
- * Supports immediate execution or scroll-triggered ('enter' | 'leave') activation across one or multiple targets.
- */
-export function breakAndFade(
-  target: Target,
-  options?: BreakAndFadeOptions
-): AnimationHandle {
-  return runAnimationWithTrigger(target, options, runSingleBreakAndFade, 'outro');
-}
-

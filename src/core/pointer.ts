@@ -61,6 +61,10 @@ function handlePointerLeave() {
   startPointerLoop();
 }
 
+function handlePointerUp(e: PointerEvent) {
+  if (e.pointerType === 'touch' || e.pointerType === 'pen') handlePointerLeave();
+}
+
 function attachListeners() {
   if (tracker.listenersAttached || typeof window === 'undefined') return;
 
@@ -69,6 +73,8 @@ function attachListeners() {
   window.addEventListener('pointerdown', handlePointerMove, opt);
   window.addEventListener('pointerleave', handlePointerLeave, opt);
   window.addEventListener('pointercancel', handlePointerLeave, opt);
+  window.addEventListener('pointerup', handlePointerUp, opt);
+  window.addEventListener('blur', handlePointerLeave);
   window.addEventListener('touchmove', handlePointerMove, opt);
   window.addEventListener('touchstart', handlePointerMove, opt);
   window.addEventListener('touchend', handlePointerLeave, opt);
@@ -83,6 +89,8 @@ function detachListeners() {
   window.removeEventListener('pointerdown', handlePointerMove);
   window.removeEventListener('pointerleave', handlePointerLeave);
   window.removeEventListener('pointercancel', handlePointerLeave);
+  window.removeEventListener('pointerup', handlePointerUp);
+  window.removeEventListener('blur', handlePointerLeave);
   window.removeEventListener('touchmove', handlePointerMove);
   window.removeEventListener('touchstart', handlePointerMove);
   window.removeEventListener('touchend', handlePointerLeave);
@@ -102,7 +110,7 @@ function pointerLoop() {
 
   tracker.idleFrames++;
 
-  if (tracker.idleFrames > MAX_IDLE_FRAMES) {
+  if (!tracker.state.isActive && tracker.idleFrames > MAX_IDLE_FRAMES) {
     stopPointerLoop();
     return;
   }

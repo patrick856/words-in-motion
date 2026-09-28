@@ -4,6 +4,7 @@ import { lampFlicker } from '../../src/intro/lampFlicker';
 import { rise } from '../../src/intro/rise';
 import { chunkedScramble } from '../../src/intro/chunkedScramble';
 import { stripRealign } from '../../src/intro/stripRealign';
+import { pixelResolve } from '../../src/intro/pixelResolve';
 import { normalizeDuration } from '../../src/core/motion';
 
 describe('Intro Animations', () => {
@@ -177,6 +178,13 @@ describe('Intro Animations', () => {
 
   it('stripRealign creates animation handle and cancels cleanly', () => {
     const handle = stripRealign(container, { strips: 4 });
+    expect(handle.finished).toBeInstanceOf(Promise);
+    expect(typeof handle.cancel).toBe('function');
+    handle.cancel();
+  });
+
+  it('pixelResolve returns a safe handle when canvas rendering is unavailable', () => {
+    const handle = pixelResolve(container);
     expect(handle.finished).toBeInstanceOf(Promise);
     expect(typeof handle.cancel).toBe('function');
     handle.cancel();

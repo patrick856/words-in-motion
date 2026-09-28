@@ -1,37 +1,14 @@
 import type { BaseScrollScrubOptions, ScrollScrubHandle, Target } from '../core/types';
 import { createScrollScrub } from '../core/scrollHelpers';
-import { clamp, lerp } from '../core/math';
-
+import { bounded } from '../core/effect';
 export interface ReadingLineOptions extends BaseScrollScrubOptions {
-  /** Baseline opacity for unread words. Defaults to 0.25. */
   baseOpacity?: number;
 }
-
-/**
- * Reading-line opacity follow scroll scrub animation.
- * Renders text at low opacity and ramps each word's opacity to 100% sequentially (word by word) on scroll.
- */
-export function readingLine(
-  target: Target,
-  options?: ReadingLineOptions
-): ScrollScrubHandle {
-  const { baseOpacity = 0.25, ...scrubOptions } = options || {};
-
-  return createScrollScrub(target, scrubOptions, ({ progress, index, total }) => {
-    const wordStep = 1 / Math.max(1, total);
-    const wordStartProgress = index * wordStep;
-    const wordEndProgress = (index + 1) * wordStep;
-
-    const wordProgress = clamp(
-      (progress - wordStartProgress) / (wordEndProgress - wordStartProgress),
-      0,
-      1
-    );
-
-    const currentOpacity = lerp(baseOpacity, 1, wordProgress);
-
-    return {
-      opacity: currentOpacity,
-    };
+/** A word-by-word reading sweep with a soft leading edge and a fully opaque final state. */
+export function readingLine(target: Target, options?: ReadingLineOptions): ScrollScrubHandle {
+  const base = bounded(options?.baseOpacity, 0.25, 0, 1);
+  return createScrollScrub(target, { ...options, by: 'words' }, ({ progress, index, total }) => {
+    const p = Math.min(1, Math.max(0, progress * (total + 1) - index));
+    return { opacity: base + (1 - base) * p * p * (3 - 2 * p) };
   });
 }

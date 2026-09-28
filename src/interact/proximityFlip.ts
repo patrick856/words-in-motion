@@ -1,31 +1,16 @@
 import type { BaseInteractOptions, InteractHandle, Target } from '../core/types';
 import { createInteraction } from '../core/interact';
-
+import { bounded } from '../core/effect';
 export interface ProximityFlipOptions extends BaseInteractOptions {
-  /** Rotation axis for flip effect ('X' or 'Y'). Defaults to 'Y'. */
   axis?: 'X' | 'Y';
-  /** Maximum rotation angle in degrees. Defaults to 180. */
-  maxAngle?: number;
+  /** Maximum tilt, default 55 degrees. */ maxAngle?: number;
 }
-
-/**
- * Proximity flip cursor interact effect.
- * Rotates characters around an axis scaling with cursor proximity.
- */
-export function proximityFlip(
-  target: Target,
-  options?: ProximityFlipOptions
-): InteractHandle {
-  const { axis = 'Y', maxAngle = 180 } = options || {};
-
-  return createInteraction(target, options, ({ progress }) => {
-    const angleDeg = progress * maxAngle;
-    const transform = axis === 'X' ? `rotateX(${angleDeg.toFixed(1)}deg)` : `rotateY(${angleDeg.toFixed(1)}deg)`;
-
-    return {
-      rotateX: axis === 'X' ? angleDeg : undefined,
-      rotateY: axis === 'Y' ? angleDeg : undefined,
-      transform,
-    };
-  });
+/** Perspective letter tilts that remain readable at the default strength. */
+export function proximityFlip(target: Target, options?: ProximityFlipOptions): InteractHandle {
+  const angle = bounded(options?.maxAngle, 55, -180, 180);
+  return createInteraction(target, options, ({ progress, options: opts }) => ({
+    transform: progress > 0 ? 'perspective(600px)' : '',
+    rotateX: options?.axis === 'X' ? angle * Math.min(1, progress * opts.strength) : 0,
+    rotateY: options?.axis !== 'X' ? angle * Math.min(1, progress * opts.strength) : 0,
+  }));
 }

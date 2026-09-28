@@ -91,9 +91,9 @@ export function runAnimationWithTrigger<O extends BaseOptions>(
   target: Target,
   options: O | undefined,
   runSingle: (element: HTMLElement, opts?: O) => AnimationHandle,
-  category: 'intro' | 'outro' = 'intro'
+  category: 'intro' | 'outro' | 'loop' = 'intro'
 ): AnimationHandle {
-  const elements = resolveElements(target);
+  const elements = [...new Set(resolveElements(target))];
   if (elements.length === 0) {
     return createDummyHandle();
   }
@@ -120,6 +120,8 @@ export function runAnimationWithTrigger<O extends BaseOptions>(
   let isCanceled = false;
   const activeHandles = new Map<HTMLElement, AnimationHandle>();
   const unsubs = new Map<HTMLElement, () => void>();
+  const resolvers: (() => void)[] = [];
+  const opacities = new Map(elements.map((el) => [el, el.style.opacity]));
 
   // If trigger is 'enter' for intro animation, keep element pre-hidden so it doesn't flash before reaching trigger
   if (trigger === 'enter' && category === 'intro') {
@@ -130,6 +132,7 @@ export function runAnimationWithTrigger<O extends BaseOptions>(
 
   const finishedPromises = elements.map((element) => {
     return new Promise<void>((resolve) => {
+      resolvers.push(resolve);
       const defaultStart = trigger === 'leave' ? 'bottom 20%' : 'top 80%';
       const start = options?.start || defaultStart;
       const once = options?.once !== false;
@@ -143,7 +146,7 @@ export function runAnimationWithTrigger<O extends BaseOptions>(
           if (isCanceled) return;
 
           if (trigger === 'enter' && category === 'intro') {
-            element.style.opacity = '';
+            element.style.opacity = opacities.get(element) ?? '';
           }
 
           const handle = runSingle(element, options);
@@ -174,6 +177,7 @@ export function runAnimationWithTrigger<O extends BaseOptions>(
   });
 
   const cancel = () => {
+    if (isCanceled) return;
     isCanceled = true;
     for (const unsub of unsubs.values()) {
       unsub();
@@ -185,9 +189,10 @@ export function runAnimationWithTrigger<O extends BaseOptions>(
     activeHandles.clear();
     if (trigger === 'enter' && category === 'intro') {
       elements.forEach((el) => {
-        el.style.opacity = '';
+        el.style.opacity = opacities.get(el) ?? '';
       });
     }
+    resolvers.forEach((resolve) => resolve());
   };
 
   return {

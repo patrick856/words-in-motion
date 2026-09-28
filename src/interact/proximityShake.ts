@@ -1,38 +1,19 @@
 import type { BaseInteractOptions, InteractHandle, Target } from '../core/types';
 import { createInteraction } from '../core/interact';
-
+import { bounded } from '../core/effect';
 export interface ProximityShakeOptions extends BaseInteractOptions {
-  /** Maximum shake oscillation amplitude in pixels. Defaults to 8. */
-  maxAmplitude?: number;
+  /** Default 3px. */ maxAmplitude?: number;
 }
-
-/**
- * Proximity shake cursor interact effect.
- * Oscillates/shakes characters with amplitude scaling with cursor proximity.
- */
-export function proximityShake(
-  target: Target,
-  options?: ProximityShakeOptions
-): InteractHandle {
-  const maxAmplitude = options?.maxAmplitude ?? 8;
-
-  return createInteraction(target, options, ({ index, progress }) => {
-    if (progress <= 0) {
-      return { translateX: 0, translateY: 0, rotate: 0 };
-    }
-
-    const time = Date.now() * 0.02;
-    const freq = 1 + (index % 3) * 0.5;
-    const amplitude = progress * maxAmplitude;
-
-    const shakeX = Math.sin(time * freq + index) * amplitude;
-    const shakeY = Math.cos(time * freq * 1.2 + index) * amplitude;
-    const shakeRot = Math.sin(time + index) * (progress * 12);
-
+/** Low-amplitude, deterministic vibration with a gentle proximity envelope. */
+export function proximityShake(target: Target, options?: ProximityShakeOptions): InteractHandle {
+  const amplitude = bounded(options?.maxAmplitude, 3, 0, 50);
+  return createInteraction(target, options, ({ index, progress, options: opts }) => {
+    const t = performance.now() * 0.012 + index * 1.618;
+    const a = amplitude * progress * Math.min(4, opts.strength);
     return {
-      translateX: shakeX,
-      translateY: shakeY,
-      rotate: shakeRot,
+      translateX: Math.sin(t) * a,
+      translateY: Math.sin(t * 0.73) * a * 0.5,
+      rotate: Math.sin(t * 0.6) * a * 0.7,
     };
   });
 }

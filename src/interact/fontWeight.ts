@@ -1,29 +1,26 @@
 import type { BaseInteractOptions, InteractHandle, Target } from '../core/types';
 import { createInteraction } from '../core/interact';
-import { lerp } from '../core/math';
-
+import { bounded } from '../core/effect';
 export interface FontWeightOptions extends BaseInteractOptions {
-  /** Minimum baseline font weight. Defaults to 300. */
-  minWeight?: number;
-  /** Maximum font weight at peak proximity. Defaults to 900. */
-  maxWeight?: number;
+  /** Baseline weight. Defaults to the text's computed font weight. */ minWeight?: number;
+  /** Peak weight. Defaults to 800. Variable fonts provide smooth interpolation. */ maxWeight?: number;
 }
-
-/**
- * Proximity font-weight increase cursor interact effect.
- * Smoothly ramps CSS font-weight from light (300) to bold/bolder (900) proportional to cursor proximity without scaling element size.
- */
-export function fontWeight(
-  target: Target,
-  options?: FontWeightOptions
-): InteractHandle {
-  const { minWeight = 300, maxWeight = 900 } = options || {};
-
-  return createInteraction(target, options, ({ char, progress }) => {
-    const currentWeight = Math.round(lerp(minWeight, maxWeight, progress));
-    char.style.fontWeight = String(currentWeight);
+/** Proximity weight modulation; inherits the site's baseline typography. */
+export function fontWeight(target: Target, options?: FontWeightOptions): InteractHandle {
+  const bases = new WeakMap<HTMLElement, number>();
+  return createInteraction(target, options, ({ char, progress, options: opts }) => {
+    if (!bases.has(char))
+      bases.set(
+        char,
+        bounded(options?.minWeight, parseFloat(getComputedStyle(char).fontWeight) || 400, 1, 1000)
+      );
+    const base = bases.get(char)!;
+    const peak = bounded(options?.maxWeight, 800, 1, 1000);
     return {
-      fontWeight: currentWeight,
+      fontWeight:
+        progress <= 0 && options?.minWeight === undefined
+          ? ''
+          : base + (peak - base) * Math.min(1, progress * opts.strength),
     };
   });
 }

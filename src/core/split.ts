@@ -5,205 +5,119 @@ export interface SplitWordsResult {
   words: HTMLElement[];
   revert: () => void;
 }
-
 export interface SplitCharsResult {
   chars: HTMLElement[];
   revert: () => void;
   granularity: 'char' | 'word';
 }
 
-interface SegmenterInstance {
-  segment(input: string): Iterable<{ segment: string }>;
+function graphemes(text: string): string[] {
+  return typeof Intl.Segmenter === 'function'
+    ? Array.from(
+        new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text),
+        (s) => s.segment
+      )
+    : Array.from(text);
 }
 
-interface IntlWithSegmenter {
-  Segmenter?: new (
-    locales?: string | string[],
-    options?: { granularity?: string }
-  ) => SegmenterInstance;
-}
-
-/**
- * Checks if the string contains Arabic or other cursive/joined script characters,
- * or if the target element has RTL directionality.
- */
-function isJoinedScriptOrRtl(element: HTMLElement, text: string): boolean {
-  const isRtl =
-    element.getAttribute('dir') === 'rtl' ||
-    (typeof window !== 'undefined' &&
-      window.getComputedStyle &&
-      window.getComputedStyle(element).direction === 'rtl');
-  const hasArabicOrJoined =
-    /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text);
-  return isRtl || hasArabicOrJoined;
-}
-
-/**
- * Segments a string into individual graphemes (emoji-safe).
- */
-function segmentGraphemes(text: string): string[] {
-  const intl = Intl as unknown as IntlWithSegmenter;
-  if (typeof intl !== 'undefined' && intl.Segmenter) {
-    const segmenter = new intl.Segmenter(undefined, { granularity: 'grapheme' });
-    return Array.from(segmenter.segment(text), (s) => s.segment);
-  }
-  return Array.from(text);
-}
-
-/**
- * Creates a layout-preserving space between generated word spans.
- *
- * A whitespace-only text node is ignored when the split target is a flex
- * container, which makes adjacent words appear to run together. An explicit
- * inline-block remains a flex item while `white-space: pre` preserves its
- * width in normal inline layout too.
- */
-function createSpace(): HTMLSpanElement {
-  const space = document.createElement('span');
-  space.classList.add('wim-space');
-  space.style.display = 'inline-block';
-  space.style.whiteSpace = 'pre';
-  space.setAttribute('aria-hidden', 'true');
-  space.textContent = ' ';
-  return space;
-}
-
-/**
- * Splits an element's text into word-level <span> elements.
- * Preserves accessibility via aria-label on the container and aria-hidden on generated spans.
- */
-export function splitWords(target: Target): SplitWordsResult {
+function split(target: Target, by: 'char' | 'word'): SplitCharsResult {
   const element = resolveElement(target);
-  if (!element) {
-    return { words: [], revert: () => {} };
-  }
-
-  const originalHTML = element.innerHTML;
-  const originalAriaLabel = element.getAttribute('aria-label');
+  if (!element) return { chars: [], revert: () => {}, granularity: by };
+  const label = element.getAttribute('aria-label');
   const text = element.textContent || '';
-
-  // Accessibility: set original text on parent aria-label
-  if (!originalAriaLabel) {
-    element.setAttribute('aria-label', text);
-  }
-
-  element.textContent = '';
-
-  const ws = typeof window !== 'undefined' ? window.getComputedStyle(element).whiteSpace : 'normal';
-  const preserveNewlines = ['pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(ws);
-
-  const words: HTMLElement[] = [];
-  const lines = preserveNewlines ? text.split('\n') : [text.replace(/\s+/g, ' ').trim()];
-
-  lines.forEach((lineText, lineIndex) => {
-    const wordTokens = lineText.trim().split(/\s+/).filter(Boolean);
-    wordTokens.forEach((wordText, wordIndex) => {
-      const wordSpan = document.createElement('span');
-      wordSpan.classList.add('wim-word');
-      wordSpan.style.display = 'inline-block';
-      wordSpan.style.whiteSpace = 'nowrap';
-      wordSpan.setAttribute('aria-hidden', 'true');
-      wordSpan.textContent = wordText;
-
-      element.appendChild(wordSpan);
-      words.push(wordSpan);
-
-      if (wordIndex < wordTokens.length - 1) {
-        element.appendChild(createSpace());
-      }
-    });
-
-    if (preserveNewlines && lineIndex < lines.length - 1) {
-      element.appendChild(document.createElement('br'));
-    }
-  });
-
-  const revert = () => {
-    element.innerHTML = originalHTML;
-    if (originalAriaLabel === null) {
-      element.removeAttribute('aria-label');
-    } else {
-      element.setAttribute('aria-label', originalAriaLabel);
-    }
-  };
-
-  return { words, revert };
-}
-
-/**
- * Splits an element's text into character-level <span> elements grouped inside word <span> containers.
- * For Arabic/RTL/joined scripts, falls back to word splitting to prevent breaking cursive joining.
- */
-export function splitChars(target: Target): SplitCharsResult {
-  const element = resolveElement(target);
-  if (!element) {
-    return { chars: [], revert: () => {}, granularity: 'char' };
-  }
-
-  const text = element.textContent || '';
-
-  // Fall back to word-level splitting for connected scripts or RTL
-  if (isJoinedScriptOrRtl(element, text)) {
-    const wordResult = splitWords(element);
-    return { chars: wordResult.words, revert: wordResult.revert, granularity: 'word' };
-  }
-
-  const originalHTML = element.innerHTML;
-  const originalAriaLabel = element.getAttribute('aria-label');
-
-  if (!originalAriaLabel) {
-    element.setAttribute('aria-label', text);
-  }
-
-  element.textContent = '';
-
-  const ws = typeof window !== 'undefined' ? window.getComputedStyle(element).whiteSpace : 'normal';
-  const preserveNewlines = ['pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(ws);
-
+  const joined =
+    /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u0900-\u0DFF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text);
+  if (joined || window.getComputedStyle(element).direction === 'rtl' || element.dir === 'rtl')
+    by = 'word';
+  if (label === null && text.trim()) element.setAttribute('aria-label', text);
   const chars: HTMLElement[] = [];
-  const lines = preserveNewlines ? text.split('\n') : [text.replace(/\s+/g, ' ').trim()];
-
-  lines.forEach((lineText, lineIndex) => {
-    const wordTokens = lineText.trim().split(/\s+/).filter(Boolean);
-    wordTokens.forEach((wordText, wordIndex) => {
-      const wordSpan = document.createElement('span');
-      wordSpan.classList.add('wim-word');
-      wordSpan.style.display = 'inline-block';
-      wordSpan.style.whiteSpace = 'nowrap';
-      wordSpan.setAttribute('aria-hidden', 'true');
-
-      const graphemes = segmentGraphemes(wordText);
-      graphemes.forEach((charText) => {
-        const charSpan = document.createElement('span');
-        charSpan.classList.add('wim-char');
-        charSpan.style.display = 'inline-block';
-        charSpan.setAttribute('aria-hidden', 'true');
-        charSpan.textContent = charText;
-
-        wordSpan.appendChild(charSpan);
-        chars.push(charSpan);
-      });
-
-      element.appendChild(wordSpan);
-
-      if (wordIndex < wordTokens.length - 1) {
-        element.appendChild(createSpace());
-      }
-    });
-
-    if (preserveNewlines && lineIndex < lines.length - 1) {
-      element.appendChild(document.createElement('br'));
+  const parents = new Map<Node, Node[]>([[element, Array.from(element.childNodes)]]);
+  const linkLabels = new Map<HTMLElement, string | null>();
+  for (const link of element.querySelectorAll<HTMLElement>('a, button')) {
+    if (!link.hasAttribute('aria-label') && !link.hasAttribute('aria-labelledby')) {
+      linkLabels.set(link, null);
+      link.setAttribute('aria-label', link.textContent || '');
     }
-  });
-
-  const revert = () => {
-    element.innerHTML = originalHTML;
-    if (originalAriaLabel === null) {
-      element.removeAttribute('aria-label');
-    } else {
-      element.setAttribute('aria-label', originalAriaLabel);
-    }
+  }
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  const texts: Text[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (!node.parentElement?.closest('script, style, textarea, [aria-hidden="true"]'))
+      texts.push(node);
+  }
+  const span = (className: string, content?: string) => {
+    const unit = document.createElement('span');
+    unit.className = className;
+    unit.style.display = 'inline-block';
+    unit.setAttribute('aria-hidden', 'true');
+    if (content !== undefined) unit.textContent = content;
+    return unit;
   };
+  for (const original of texts) {
+    const fragment = document.createDocumentFragment();
+    if (original.parentNode && !parents.has(original.parentNode))
+      parents.set(original.parentNode, Array.from(original.parentNode.childNodes));
+    const ws = window.getComputedStyle(original.parentElement!).whiteSpace;
+    const preserve = ['pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(ws);
+    for (const token of original.data.split(/(\s+)/u).filter(Boolean)) {
+      if (/^\s+$/u.test(token)) {
+        if (preserve) {
+          token.split('\n').forEach((part, i) => {
+            if (i) fragment.append(document.createElement('br'));
+            if (part) {
+              const space = span('wim-space', part);
+              space.style.whiteSpace = 'pre';
+              fragment.append(space);
+            }
+          });
+        } else {
+          const space = span('wim-space', token.replace(/[\t\r\n ]+/g, ' '));
+          space.style.whiteSpace = 'pre';
+          fragment.append(space);
+        }
+        continue;
+      }
+      const word = span('wim-word');
+      word.style.whiteSpace = 'nowrap';
+      if (by === 'word') {
+        word.textContent = token;
+        chars.push(word);
+      } else {
+        for (const g of graphemes(token)) {
+          const char = span('wim-char', g);
+          word.append(char);
+          chars.push(char);
+        }
+      }
+      fragment.append(word);
+    }
+    original.replaceWith(fragment);
+  }
+  let reverted = false;
+  return {
+    chars,
+    granularity: by,
+    revert: () => {
+      if (reverted) return;
+      reverted = true;
+      for (const [parent, children] of parents) {
+        (parent as HTMLElement).replaceChildren(...children);
+      }
+      if (label === null) element.removeAttribute('aria-label');
+      else element.setAttribute('aria-label', label);
+      for (const link of linkLabels.keys()) link.removeAttribute('aria-label');
+    },
+  };
+}
 
-  return { chars, revert, granularity: 'char' };
+/** Preserves nested markup, original nodes/listeners, explicit breaks and accessible labels. */
+export function splitWords(target: Target): SplitWordsResult {
+  const result = split(target, 'word');
+  return { words: result.chars, revert: result.revert };
+}
+
+/** Grapheme-safe characters; joined scripts and RTL retain whole words. */
+export function splitChars(target: Target): SplitCharsResult {
+  return split(target, 'char');
 }

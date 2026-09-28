@@ -3,10 +3,12 @@ import { lampFlicker } from '../src/intro/lampFlicker';
 import { rise } from '../src/intro/rise';
 import { chunkedScramble } from '../src/intro/chunkedScramble';
 import { stripRealign } from '../src/intro/stripRealign';
+import { pixelResolve } from '../src/intro/pixelResolve';
+import { wave, float, breathe, shimmer, pendulum } from '../src/loop';
 
 import { blackHole } from '../src/outro/blackHole';
 import { paperCut } from '../src/outro/paperCut';
-import { portal } from '../src/outro/portal';
+import { hingeDrop, blurAway, windScatter } from '../src/outro';
 import { breakAndFade } from '../src/outro/breakAndFade';
 
 import { waveRelay } from '../src/scroll/waveRelay';
@@ -26,17 +28,13 @@ import { accentColor } from '../src/interact/accentColor';
 export interface AnimationEntry {
   name: string;
   category: 'intro' | 'loop' | 'outro' | 'interact' | 'scroll';
-  run: (
-    el: HTMLElement
-  ) =>
-    | {
-        finished?: Promise<void>;
-        cancel?: () => void;
-        destroy?: () => void;
-        pause?: () => void;
-        resume?: () => void;
-      }
-    | void;
+  run: (el: HTMLElement) => {
+    finished?: Promise<void>;
+    cancel?: () => void;
+    destroy?: () => void;
+    pause?: () => void;
+    resume?: () => void;
+  } | void;
 }
 
 /**
@@ -49,11 +47,21 @@ export const registry: AnimationEntry[] = [
   { name: 'rise', category: 'intro', run: (el) => rise(el) },
   { name: 'chunkedScramble', category: 'intro', run: (el) => chunkedScramble(el) },
   { name: 'stripRealign', category: 'intro', run: (el) => stripRealign(el) },
+  { name: 'pixelResolve', category: 'intro', run: (el) => pixelResolve(el) },
+
+  // Loop animations
+  { name: 'wave', category: 'loop', run: (el) => wave(el) },
+  { name: 'float', category: 'loop', run: (el) => float(el) },
+  { name: 'breathe', category: 'loop', run: (el) => breathe(el) },
+  { name: 'shimmer', category: 'loop', run: (el) => shimmer(el) },
+  { name: 'pendulum', category: 'loop', run: (el) => pendulum(el) },
 
   // Outro animations
   { name: 'blackHole', category: 'outro', run: (el) => blackHole(el) },
   { name: 'paperCut', category: 'outro', run: (el) => paperCut(el) },
-  { name: 'portal', category: 'outro', run: (el) => portal(el) },
+  { name: 'hingeDrop', category: 'outro', run: (el) => hingeDrop(el) },
+  { name: 'blurAway', category: 'outro', run: (el) => blurAway(el) },
+  { name: 'windScatter', category: 'outro', run: (el) => windScatter(el) },
   { name: 'breakAndFade', category: 'outro', run: (el) => breakAndFade(el) },
 
   // Scroll animations

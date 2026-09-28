@@ -3,8 +3,10 @@ import { resolveElements, prefersReducedMotion } from './motion';
 import { splitChars } from './split';
 import { createCharMeasurer, MeasurerHandle } from './measure';
 import { observeVisibility } from './visibility';
-import { subscribePointer, getPointerState, PointerState } from './pointer';
+import { subscribePointer, getPointerState, PointerState, startPointerLoop } from './pointer';
+import { bounded, ownEffect, stopEffect } from './effect';
 import { clamp, lerp } from './math';
+import { resolveLetterContacts, type LetterBody, type CursorBody } from './collision';
 
 export interface InteractUpdateContext {
   char: HTMLElement;
@@ -19,6 +21,10 @@ export interface InteractUpdateContext {
 }
 
 export interface InteractCharStyles {
+  /** Resolve letter contacts after composing the frame's translations. */
+  collide?: boolean;
+  /** Cursor contact radius in CSS pixels; zero is a point, undefined disables contact. */
+  cursorObstacle?: number;
   /** Target transform string (e.g. 'translate3d(10px, 0, 0)') */
   transform?: string;
   /** Target opacity value (0..1) */
@@ -51,6 +57,7 @@ const DEFAULT_OPTIONS: Required<BaseInteractOptions> = {
 };
 
 interface InstanceCharState {
+  collide: boolean;
   currX: number;
   currY: number;
   currScale: number;
@@ -76,6 +83,7 @@ interface InteractionInstance {
 }
 
 interface ElementContext {
+  release: () => void;
   element: HTMLElement;
   chars: HTMLElement[];
   revert: () => void;
@@ -124,13 +132,33 @@ function createDummyInteractHandle(): InteractHandle {
 
 function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) => void {
   const { element, chars, measurer, instances } = ctx;
+  let lastTime = performance.now();
+  let offsets = chars.map(() => ({ x: 0, y: 0 }));
+  let previousDesired = chars.map(() => ({ x: 0, y: 0 }));
+  let previousMeasures = measurer.getMeasures();
+  let previousCursor: CursorBody | undefined;
 
   return (pointer: PointerState) => {
     if (!ctx.isVisible || instances.size === 0) return;
+    const now = performance.now();
+    const frameScale = Math.min(4, Math.max(0.25, (now - lastTime) / (1000 / 60)));
+    lastTime = now;
+    const reduced = prefersReducedMotion();
 
     // Single bounding rect evaluation for this element per frame
     const containerRect = element.getBoundingClientRect();
     const measures = measurer.getMeasures();
+    if (measures !== previousMeasures) {
+      offsets = chars.map(() => ({ x: 0, y: 0 }));
+      previousDesired = chars.map(() => ({ x: 0, y: 0 }));
+      previousCursor = undefined;
+      previousMeasures = measures;
+    }
+    const bodies: LetterBody[] = [];
+    const desired: { x: number; y: number }[] = [];
+    let collisions = false;
+    let collisionDecay = 0;
+    let obstacleRadius: number | undefined;
 
     let elementHasCustomColor = false;
     let elementHasCustomFontWeight = false;
@@ -138,7 +166,7 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
     // Compose effects per character
     for (let i = 0; i < chars.length; i++) {
       const charEl = chars[i];
-      const measure = measures[i] || { x: 0, y: 0 };
+      const measure = measures[i] || { x: 0, y: 0, width: 0, height: 0 };
       const charClientX = containerRect.left + measure.x;
       const charClientY = containerRect.top + measure.y;
 
@@ -162,18 +190,26 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
       let charFontWeight = '';
 
       for (const inst of instances) {
+        const easing =
+          inst.options.respectReducedMotion && reduced
+            ? 1
+            : 1 - Math.pow(1 - inst.options.easing, frameScale);
         const state = inst.charStates[i];
         if (!state) continue;
+        if (state.collide && !(inst.options.respectReducedMotion && reduced)) {
+          collisions = true;
+          collisionDecay = Math.max(collisionDecay, 1 - easing);
+        }
 
         if (inst.isPaused) {
           // If paused, lerp state smoothly back to resting values
-          state.currX = lerp(state.currX, 0, inst.options.easing);
-          state.currY = lerp(state.currY, 0, inst.options.easing);
-          state.currScale = lerp(state.currScale, 1, inst.options.easing);
-          state.currRotate = lerp(state.currRotate, 0, inst.options.easing);
-          state.currRotateX = lerp(state.currRotateX, 0, inst.options.easing);
-          state.currRotateY = lerp(state.currRotateY, 0, inst.options.easing);
-          state.currOpacity = lerp(state.currOpacity, 1, inst.options.easing);
+          state.currX = lerp(state.currX, 0, easing);
+          state.currY = lerp(state.currY, 0, easing);
+          state.currScale = lerp(state.currScale, 1, easing);
+          state.currRotate = lerp(state.currRotate, 0, easing);
+          state.currRotateX = lerp(state.currRotateX, 0, easing);
+          state.currRotateY = lerp(state.currRotateY, 0, easing);
+          state.currOpacity = lerp(state.currOpacity, 1, easing);
 
           if (
             Math.abs(state.currX) > 0.01 ||
@@ -219,9 +255,9 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
           }
         }
 
-        const isReducedMotion = inst.options.respectReducedMotion && prefersReducedMotion();
+        const isReducedMotion = inst.options.respectReducedMotion && reduced;
         const rawProgress = pointerActive ? clamp(1 - dist / inst.options.radius, 0, 1) : 0;
-        const progress = isReducedMotion ? 0 : rawProgress;
+        const progress = isReducedMotion ? 0 : rawProgress * rawProgress * (3 - 2 * rawProgress);
 
         let targetStyles: InteractCharStyles | void = undefined;
         if (inst.update) {
@@ -243,6 +279,16 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
         }
 
         if (targetStyles) {
+          state.collide = targetStyles.collide === true;
+          if (state.collide && !isReducedMotion) {
+            collisions = true;
+            collisionDecay = Math.max(collisionDecay, 1 - easing);
+            if (pointerActive && targetStyles.cursorObstacle !== undefined)
+              obstacleRadius = Math.max(
+                obstacleRadius ?? 0,
+                bounded(targetStyles.cursorObstacle, 0, 0, 500)
+              );
+          }
           let targetX = (targetStyles.translateX ?? 0) * (isReducedMotion ? 0 : 1);
           let targetY = (targetStyles.translateY ?? 0) * (isReducedMotion ? 0 : 1);
           let targetScale = isReducedMotion ? 1 : (targetStyles.scale ?? 1);
@@ -274,7 +320,7 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
               .replace(/scale\([-\d.]+\)/g, '')
               .replace(/translate3d\([^)]+\)/g, '')
               .trim();
-            if (cleaned) {
+            if (cleaned && !isReducedMotion) {
               state.extraTransform = cleaned;
             }
           }
@@ -282,13 +328,13 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
           const targetOpacity = targetStyles.opacity ?? 1;
           state.hasOpacity = targetStyles.opacity !== undefined;
 
-          state.currX = lerp(state.currX, targetX, inst.options.easing);
-          state.currY = lerp(state.currY, targetY, inst.options.easing);
-          state.currScale = lerp(state.currScale, targetScale, inst.options.easing);
-          state.currRotate = lerp(state.currRotate, targetRotate, inst.options.easing);
-          state.currRotateX = lerp(state.currRotateX, targetRotateX, inst.options.easing);
-          state.currRotateY = lerp(state.currRotateY, targetRotateY, inst.options.easing);
-          state.currOpacity = lerp(state.currOpacity, targetOpacity, inst.options.easing);
+          state.currX = lerp(state.currX, targetX, easing);
+          state.currY = lerp(state.currY, targetY, easing);
+          state.currScale = lerp(state.currScale, targetScale, easing);
+          state.currRotate = lerp(state.currRotate, targetRotate, easing);
+          state.currRotateX = lerp(state.currRotateX, targetRotateX, easing);
+          state.currRotateY = lerp(state.currRotateY, targetRotateY, easing);
+          state.currOpacity = lerp(state.currOpacity, targetOpacity, easing);
 
           state.hasTransform = Boolean(
             targetStyles.translateX !== undefined ||
@@ -308,15 +354,16 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
 
           state.filter = targetStyles.filter || '';
           state.color = targetStyles.color || '';
-          state.fontWeight = targetStyles.fontWeight !== undefined ? String(targetStyles.fontWeight) : '';
+          state.fontWeight =
+            targetStyles.fontWeight !== undefined ? String(targetStyles.fontWeight) : '';
         } else {
-          state.currX = lerp(state.currX, 0, inst.options.easing);
-          state.currY = lerp(state.currY, 0, inst.options.easing);
-          state.currScale = lerp(state.currScale, 1, inst.options.easing);
-          state.currRotate = lerp(state.currRotate, 0, inst.options.easing);
-          state.currRotateX = lerp(state.currRotateX, 0, inst.options.easing);
-          state.currRotateY = lerp(state.currRotateY, 0, inst.options.easing);
-          state.currOpacity = lerp(state.currOpacity, 1, inst.options.easing);
+          state.currX = lerp(state.currX, 0, easing);
+          state.currY = lerp(state.currY, 0, easing);
+          state.currScale = lerp(state.currScale, 1, easing);
+          state.currRotate = lerp(state.currRotate, 0, easing);
+          state.currRotateX = lerp(state.currRotateX, 0, easing);
+          state.currRotateY = lerp(state.currRotateY, 0, easing);
+          state.currOpacity = lerp(state.currOpacity, 1, easing);
           state.hasTransform = Math.abs(state.currX) > 0.01 || Math.abs(state.currY) > 0.01;
           state.filter = '';
           state.color = '';
@@ -355,6 +402,20 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
           elementHasCustomFontWeight = true;
         }
       } // end instances loop
+      const radians = (sumRotate * Math.PI) / 180;
+      const cos = Math.abs(Math.cos(radians));
+      const sin = Math.abs(Math.sin(radians));
+      desired.push({ x: sumX, y: sumY });
+      bodies.push({
+        x: measure.x + sumX,
+        y: measure.y + sumY,
+        homeX: measure.x,
+        homeY: measure.y,
+        width: (measure.width * cos + measure.height * sin) * Math.abs(prodScale),
+        height: (measure.height * cos + measure.width * sin) * Math.abs(prodScale),
+        homeWidth: measure.width,
+        homeHeight: measure.height,
+      });
 
       // Apply composed transform
       if (hasTransform) {
@@ -375,7 +436,7 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
           parts.push(`rotateY(${sumRotateY.toFixed(2)}deg)`);
         }
         if (extraTransforms.length > 0) {
-          parts.push(extraTransforms.join(' '));
+          parts.unshift(extraTransforms.join(' '));
         }
         charEl.style.transform = parts.length > 0 ? parts.join(' ') : '';
       } else {
@@ -415,6 +476,71 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
       }
     } // end chars loop
 
+    if (collisions) {
+      const cursor =
+        obstacleRadius !== undefined
+          ? {
+              x: pointer.x - containerRect.left,
+              y: pointer.y - containerRect.top,
+              radius: obstacleRadius,
+            }
+          : undefined;
+      let travel = 0;
+      let stepSize = 8;
+      const deltas = bodies.map((body, i) => {
+        const x = desired[i].x - previousDesired[i].x + offsets[i].x * (collisionDecay - 1);
+        const y = desired[i].y - previousDesired[i].y + offsets[i].y * (collisionDecay - 1);
+        travel = Math.max(travel, Math.hypot(x, y));
+        if (body.width > 0 && body.height > 0)
+          stepSize = Math.min(stepSize, Math.max(1, Math.min(body.width, body.height) / 2));
+        body.x = body.homeX + previousDesired[i].x + offsets[i].x;
+        body.y = body.homeY + previousDesired[i].y + offsets[i].y;
+        return { x, y };
+      });
+      const cursorTravel =
+        cursor && previousCursor
+          ? Math.hypot(cursor.x - previousCursor.x, cursor.y - previousCursor.y)
+          : 0;
+      const sweepCursor = !!cursor && !!previousCursor && cursorTravel < 600;
+      if (sweepCursor) travel = Math.max(travel, cursorTravel);
+      // Small integration steps keep letters from swapping sides or tunneling
+      // through each other even at high strength or easing: 1.
+      const steps = Math.min(128, Math.max(1, Math.ceil(travel / stepSize)));
+      for (let step = 1; step <= steps; step++) {
+        bodies.forEach((body, i) => {
+          body.x += deltas[i].x / steps;
+          body.y += deltas[i].y / steps;
+        });
+        resolveLetterContacts(
+          bodies,
+          sweepCursor
+            ? {
+                x: lerp(previousCursor!.x, cursor!.x, step / steps),
+                y: lerp(previousCursor!.y, cursor!.y, step / steps),
+                radius: cursor!.radius,
+              }
+            : cursor
+        );
+      }
+      previousCursor = cursor;
+      bodies.forEach((body, i) => {
+        const x = body.x - body.homeX;
+        const y = body.y - body.homeY;
+        offsets[i] = { x: x - desired[i].x, y: y - desired[i].y };
+        if (Math.abs(offsets[i].x) < 0.001) offsets[i].x = 0;
+        if (Math.abs(offsets[i].y) < 0.001) offsets[i].y = 0;
+        const rest = chars[i].style.transform.replace(/translate3d\([^)]+\)/g, '').trim();
+        chars[i].style.transform =
+          Math.abs(x) > 0.001 || Math.abs(y) > 0.001
+            ? `translate3d(${x.toFixed(4)}px,${y.toFixed(4)}px,0) ${rest}`.trim()
+            : rest;
+      });
+    } else {
+      offsets = chars.map(() => ({ x: 0, y: 0 }));
+      previousCursor = undefined;
+    }
+    previousDesired = desired;
+
     ctx.hasCustomColor = elementHasCustomColor;
     ctx.hasCustomFontWeight = elementHasCustomFontWeight;
   };
@@ -431,6 +557,7 @@ function destroyInstance(instance: InteractionInstance) {
     ctx.unobserveVisibility();
     ctx.measurer.destroy();
     ctx.revert();
+    ctx.release();
     elementContexts.delete(instance.element);
     checkPointerTeardown();
   } else {
@@ -448,12 +575,17 @@ function createSingleInteraction(
     ...DEFAULT_OPTIONS,
     ...options,
   };
+  opts.radius = bounded(opts.radius, 150, 1, 4000);
+  opts.strength = bounded(opts.strength, 1, 0, 500);
+  opts.easing = bounded(opts.easing, 0.1, 0.01, 1);
 
   // Find or create ElementContext for this DOM element
   let ctx = elementContexts.get(element);
   if (!ctx) {
+    stopEffect(element);
     const { chars, revert } = splitChars(element);
     if (chars.length === 0) {
+      revert();
       return createDummyInteractHandle();
     }
 
@@ -461,14 +593,22 @@ function createSingleInteraction(
     let isVisible = true;
     const unobserveVisibility = observeVisibility(element, (visible) => {
       isVisible = visible;
+      if (visible) startPointerLoop();
     });
+    const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const preference = () => startPointerLoop();
+    media?.addEventListener?.('change', preference);
 
     ctx = {
+      release: () => {},
       element,
       chars,
       revert,
       measurer,
-      unobserveVisibility,
+      unobserveVisibility: () => {
+        unobserveVisibility();
+        media?.removeEventListener?.('change', preference);
+      },
       get isVisible() {
         return isVisible;
       },
@@ -480,10 +620,15 @@ function createSingleInteraction(
 
     ctx.renderComposed = createComposedRenderer(ctx);
     elementContexts.set(element, ctx);
+    const ownedContext = ctx;
+    ctx.release = ownEffect(element, () => {
+      for (const instance of [...ownedContext.instances]) destroyInstance(instance);
+    });
   }
 
   const instanceId = ++instanceIdCounter;
   const charStates: InstanceCharState[] = ctx.chars.map(() => ({
+    collide: false,
     currX: 0,
     currY: 0,
     currScale: 1,
@@ -511,7 +656,10 @@ function createSingleInteraction(
   ctx.instances.add(instance);
   ensurePointerSubscribed();
 
+  let destroyed = false;
   const destroy = () => {
+    if (destroyed) return;
+    destroyed = true;
     destroyInstance(instance);
   };
 
@@ -519,10 +667,14 @@ function createSingleInteraction(
     destroy,
     cancel: destroy,
     pause: () => {
+      if (destroyed) return;
       instance.isPaused = true;
+      startPointerLoop();
     },
     resume: () => {
+      if (destroyed) return;
       instance.isPaused = false;
+      startPointerLoop();
     },
   };
 }
@@ -562,7 +714,10 @@ export function createInteraction(
 export function _getInteractDebug() {
   return {
     elementCount: elementContexts.size,
-    totalInstances: Array.from(elementContexts.values()).reduce((sum, c) => sum + c.instances.size, 0),
+    totalInstances: Array.from(elementContexts.values()).reduce(
+      (sum, c) => sum + c.instances.size,
+      0
+    ),
     isPointerSubscribed: unsubscribePointer !== null,
   };
 }

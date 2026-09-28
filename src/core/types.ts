@@ -156,6 +156,8 @@ export interface BaseScrollTriggerOptions extends BaseScrollOptions, BaseOptions
  * Options accepted by scroll scrub mode animations.
  */
 export interface BaseScrollScrubOptions extends BaseScrollOptions {
+  /** Unit granularity. Defaults to characters; joined scripts retain whole words. */
+  by?: 'chars' | 'words';
   /** Smoothing lerp factor for scrub progress (0..1). 1 means instant scroll tracking. Defaults to 1. */
   smooth?: number;
 }
@@ -164,4 +166,3 @@ export interface BaseScrollScrubOptions extends BaseScrollOptions {
  * Options accepted by scroll scrub animations (progress tied directly to scroll position).
  */
 export type ScrollScrubOptions = BaseScrollScrubOptions;
-

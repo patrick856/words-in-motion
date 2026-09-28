@@ -63,14 +63,16 @@ function renderCategorySection(
       categoryKey === 'interact'
         ? 'No interact effects added yet.'
         : categoryKey === 'scroll'
-        ? 'No scroll animations added yet.'
-        : `No ${categoryKey} animations added yet.`;
+          ? 'No scroll animations added yet.'
+          : `No ${categoryKey} animations added yet.`;
     container.appendChild(emptyState);
     return;
   }
 
   const grid = document.createElement('div');
   grid.className = 'cards-grid';
+  // Effects measure live layout; mount the grid before invoking any animation.
+  container.appendChild(grid);
 
   entries.forEach((entry) => {
     const card = document.createElement('div');
@@ -211,8 +213,6 @@ function renderCategorySection(
       runAnimation();
     }
   });
-
-  container.appendChild(grid);
 }
 
 function initPlayground() {

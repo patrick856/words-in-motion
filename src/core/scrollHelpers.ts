@@ -7,9 +7,10 @@ import type {
   Target,
 } from './types';
 import { resolveElements, prefersReducedMotion } from './motion';
-import { splitChars } from './split';
-import { subscribeScrollScrub, subscribeScrollTrigger } from './scroll';
-import { lerp } from './math';
+import { splitChars, splitWords } from './split';
+import { calculateScrollProgress, subscribeScrollScrub, subscribeScrollTrigger } from './scroll';
+import { bounded, ownEffect, stopEffect } from './effect';
+import { createCharMeasurer, type CharMeasure } from './measure';
 
 export interface ScrollScrubUpdateContext {
   progress: number;
@@ -17,140 +18,78 @@ export interface ScrollScrubUpdateContext {
   total: number;
   char: HTMLElement;
   element: HTMLElement;
+  /** Resting positions, refreshed after layout or font changes. */
+  measures: CharMeasure[];
 }
-
 export interface ScrollCharTargetStyles {
   transform?: string;
   opacity?: number;
   filter?: string;
-
   translateX?: number;
   translateY?: number;
   scale?: number;
   rotate?: number;
 }
-
 export type ScrollScrubUpdateCallback = (
   ctx: ScrollScrubUpdateContext
 ) => ScrollCharTargetStyles | void;
+export type ScrollTriggerPlayCallback = (element: HTMLElement) => AnimationHandle;
+const dummyScrub = (): ScrollScrubHandle => ({ destroy() {}, pause() {}, resume() {} });
 
-export type ScrollTriggerPlayCallback = (
-  element: HTMLElement
-) => AnimationHandle;
-
-function createDummyTriggerHandle(): ScrollTriggerHandle {
-  return {
-    finished: Promise.resolve(),
-    cancel: () => {},
-    destroy: () => {},
-  };
-}
-
-function createDummyScrubHandle(): ScrollScrubHandle {
-  return {
-    destroy: () => {},
-    pause: () => {},
-    resume: () => {},
-  };
-}
-
-function createSingleScrollTrigger(
+function singleTrigger(
   element: HTMLElement,
   options?: BaseScrollTriggerOptions,
   play?: ScrollTriggerPlayCallback
 ): ScrollTriggerHandle {
-  const opts: BaseScrollTriggerOptions = {
-    start: 'top 80%',
-    once: true,
-    repeat: false,
-    respectReducedMotion: true,
-    ...options,
-  };
-
-  const isOnce = opts.repeat === true ? false : opts.once !== false;
-  const isReducedMotion = opts.respectReducedMotion !== false && prefersReducedMotion();
-
-  let activeAnimation: AnimationHandle | null = null;
-  let finishedResolve: () => void = () => {};
-
-  const finishedPromise = new Promise<void>((resolve) => {
-    finishedResolve = resolve;
+  if (options?.respectReducedMotion !== false && prefersReducedMotion())
+    return { finished: Promise.resolve(), cancel() {}, destroy() {} };
+  let active: AnimationHandle | undefined;
+  let destroyed = false;
+  let resolve!: () => void;
+  const finished = new Promise<void>((r) => {
+    resolve = r;
   });
-
-  const triggerAnimation = () => {
-    if (activeAnimation) {
-      activeAnimation.cancel();
-      activeAnimation = null;
-    }
-
-    if (isReducedMotion) {
-      finishedResolve();
-      return;
-    }
-
-    if (play) {
-      activeAnimation = play(element);
-      activeAnimation.finished
-        .then(() => {
-          finishedResolve();
-        })
-        .catch(() => {});
-    } else {
-      finishedResolve();
-    }
-  };
-
-  const unsubscribeTrigger = subscribeScrollTrigger({
+  const unsubscribe = subscribeScrollTrigger({
     element,
     trigger: 'enter',
-    start: opts.start,
-    once: isOnce,
-    onTrigger: triggerAnimation,
+    start: options?.start ?? 'top 80%',
+    once: options?.repeat ? false : options?.once !== false,
+    onTrigger: () => {
+      if (destroyed) return;
+      active?.cancel();
+      active = play?.(element);
+      if (active) void active.finished.then(resolve, resolve);
+      else resolve();
+    },
     onReset: () => {
-      if (activeAnimation) {
-        activeAnimation.cancel();
-        activeAnimation = null;
-      }
+      active?.cancel();
+      active = undefined;
     },
   });
-
   const cancel = () => {
-    if (activeAnimation) {
-      activeAnimation.cancel();
-      activeAnimation = null;
-    }
+    active?.cancel();
+    active = undefined;
+    resolve();
   };
-
-  const destroy = () => {
-    cancel();
-    unsubscribeTrigger();
-  };
-
   return {
-    finished: finishedPromise,
+    finished,
     cancel,
-    destroy,
+    destroy: () => {
+      if (destroyed) return;
+      destroyed = true;
+      unsubscribe();
+      cancel();
+    },
   };
 }
-
-/**
- * Foundation factory for creating trigger-mode scroll animations (plays when element reaches viewport scroll position).
- */
 export function createScrollTrigger(
   target: Target,
   options?: BaseScrollTriggerOptions,
   play?: ScrollTriggerPlayCallback
 ): ScrollTriggerHandle {
-  const elements = resolveElements(target);
-  if (elements.length === 0) {
-    return createDummyTriggerHandle();
-  }
-
-  if (elements.length === 1) {
-    return createSingleScrollTrigger(elements[0], options, play);
-  }
-
-  const handles = elements.map((el) => createSingleScrollTrigger(el, options, play));
+  const handles = [...new Set(resolveElements(target))].map((el) =>
+    singleTrigger(el, options, play)
+  );
   return {
     finished: Promise.all(handles.map((h) => h.finished)).then(() => {}),
     cancel: () => handles.forEach((h) => h.cancel()),
@@ -158,147 +97,114 @@ export function createScrollTrigger(
   };
 }
 
-function createSingleScrollScrub(
+function singleScrub(
   element: HTMLElement,
   options?: BaseScrollScrubOptions,
   update?: ScrollScrubUpdateCallback
 ): ScrollScrubHandle {
-  const opts: BaseScrollScrubOptions = {
-    start: 'top 80%',
-    end: 'top 20%',
-    smooth: 1,
-    respectReducedMotion: true,
-    ...options,
-  };
-
-  const isReducedMotion = opts.respectReducedMotion !== false && prefersReducedMotion();
-
-  // Split text into character spans
-  const { chars, revert } = splitChars(element);
-  if (chars.length === 0) {
-    return createDummyScrubHandle();
+  stopEffect(element);
+  if (options?.respectReducedMotion !== false && prefersReducedMotion()) return dummyScrub();
+  const split = options?.by === 'words' ? splitWords(element) : splitChars(element);
+  const chars = 'words' in split ? split.words : split.chars;
+  if (!chars.length) {
+    split.revert();
+    return dummyScrub();
   }
-
-  let isPaused = false;
-  let currentProgress = 0;
-
-  // Track per-character interpolated state
-  const charStates = chars.map(() => ({
-    currX: 0,
-    currY: 0,
-    currScale: 1,
-    currRotate: 0,
-    currOpacity: 1,
-  }));
-
-  const handleScrollProgress = (rawProgress: number) => {
-    if (isPaused) return;
-
-    const targetProgress = isReducedMotion ? 1 : rawProgress;
-    const smoothFactor = opts.smooth ?? 1;
-
-    currentProgress = smoothFactor >= 1 ? targetProgress : lerp(currentProgress, targetProgress, smoothFactor);
-
-    for (let i = 0; i < chars.length; i++) {
-      const charEl = chars[i];
-      let targetStyles: ScrollCharTargetStyles | void = undefined;
-
-      if (update) {
-        targetStyles = update({
-          progress: currentProgress,
-          index: i,
-          total: chars.length,
-          char: charEl,
-          element,
-        });
-      }
-
-      if (targetStyles) {
-        const state = charStates[i];
-
-        const targetX = targetStyles.translateX ?? 0;
-        const targetY = targetStyles.translateY ?? 0;
-        const targetScale = targetStyles.scale ?? 1;
-        const targetRotate = targetStyles.rotate ?? 0;
-        const targetOpacity = targetStyles.opacity ?? 1;
-
-        if (smoothFactor >= 1) {
-          state.currX = targetX;
-          state.currY = targetY;
-          state.currScale = targetScale;
-          state.currRotate = targetRotate;
-          state.currOpacity = targetOpacity;
-        } else {
-          state.currX = lerp(state.currX, targetX, smoothFactor);
-          state.currY = lerp(state.currY, targetY, smoothFactor);
-          state.currScale = lerp(state.currScale, targetScale, smoothFactor);
-          state.currRotate = lerp(state.currRotate, targetRotate, smoothFactor);
-          state.currOpacity = lerp(state.currOpacity, targetOpacity, smoothFactor);
-        }
-
-        let transformStr = targetStyles.transform;
-        if (!transformStr && (state.currX || state.currY || state.currScale !== 1 || state.currRotate)) {
-          transformStr = `translate3d(${state.currX.toFixed(2)}px, ${state.currY.toFixed(2)}px, 0) scale(${state.currScale.toFixed(3)}) rotate(${state.currRotate.toFixed(2)}deg)`;
-        }
-
-        if (transformStr !== undefined) {
-          charEl.style.transform = transformStr;
-        }
-        if (targetStyles.opacity !== undefined || state.currOpacity !== 1) {
-          charEl.style.opacity = state.currOpacity.toFixed(3);
-        }
-        if (targetStyles.filter !== undefined) {
-          charEl.style.filter = targetStyles.filter;
-        }
-      }
-    }
+  const measurer = createCharMeasurer(element, chars);
+  let destroyed = false;
+  let paused = false;
+  let current: number | undefined;
+  let lastTime = performance.now();
+  const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const render = (raw: number) => {
+    if (destroyed || paused) return;
+    const reduced = options?.respectReducedMotion !== false && media?.matches;
+    const now = performance.now();
+    const smooth = reduced ? 1 : bounded(options?.smooth, 1, 0.01, 1);
+    const factor =
+      1 - Math.pow(1 - smooth, Math.min(4, Math.max(0.25, (now - lastTime) / (1000 / 60))));
+    lastTime = now;
+    const target = reduced ? 1 : bounded(raw, 0, 0, 1);
+    current =
+      current === undefined || target === 0 || target === 1
+        ? target
+        : current + (target - current) * factor;
+    const measures = measurer.getMeasures();
+    chars.forEach((char, index) => {
+      const styles = update?.({
+        progress: current!,
+        index,
+        total: chars.length,
+        char,
+        element,
+        measures,
+      });
+      if (!styles) return;
+      const x = bounded(styles.translateX, 0, -100000, 100000);
+      const y = bounded(styles.translateY, 0, -100000, 100000);
+      const scale = bounded(styles.scale, 1, 0, 100);
+      const rotate = bounded(styles.rotate, 0, -3600, 3600);
+      char.style.transform =
+        styles.transform ??
+        (x || y || scale !== 1 || rotate
+          ? `translate3d(${x}px,${y}px,0) scale(${scale}) rotate(${rotate}deg)`
+          : '');
+      char.style.opacity =
+        styles.opacity === undefined ? '' : String(bounded(styles.opacity, 1, 0, 1));
+      char.style.filter = styles.filter ?? '';
+    });
   };
-
-  const unsubscribeScroll = subscribeScrollScrub({
+  const read = () =>
+    calculateScrollProgress(
+      element.getBoundingClientRect(),
+      window.innerHeight,
+      options?.start,
+      options?.end
+    );
+  render(read());
+  const unsubscribe = subscribeScrollScrub({
     element,
-    start: opts.start,
-    end: opts.end,
-    callback: handleScrollProgress,
+    start: options?.start,
+    end: options?.end,
+    callback: render,
   });
-
+  let release = () => {};
   const destroy = () => {
-    unsubscribeScroll();
-    revert();
+    if (destroyed) return;
+    destroyed = true;
+    unsubscribe();
+    measurer.destroy();
+    split.revert();
+    release();
+    media?.removeEventListener?.('change', preference);
   };
-
-  const pause = () => {
-    isPaused = true;
+  const preference = () => {
+    if (media?.matches && options?.respectReducedMotion !== false) destroy();
   };
-
-  const resume = () => {
-    isPaused = false;
-  };
-
+  media?.addEventListener?.('change', preference);
+  release = ownEffect(element, destroy);
   return {
     destroy,
-    pause,
-    resume,
+    pause: () => {
+      paused = true;
+    },
+    resume: () => {
+      if (!destroyed) {
+        paused = false;
+        current = undefined;
+        render(read());
+      }
+    },
   };
 }
-
-/**
- * Foundation factory for creating scrub-mode scroll animations (progress directly tied to scroll position).
- */
 export function createScrollScrub(
   target: Target,
   options?: BaseScrollScrubOptions,
   update?: ScrollScrubUpdateCallback
 ): ScrollScrubHandle {
-  const elements = resolveElements(target);
-  if (elements.length === 0) {
-    return createDummyScrubHandle();
-  }
-
-  if (elements.length === 1) {
-    return createSingleScrollScrub(elements[0], options, update);
-  }
-
-  const handles = elements.map((el) => createSingleScrollScrub(el, options, update));
+  const handles = [...new Set(resolveElements(target))].map((el) =>
+    singleScrub(el, options, update)
+  );
   return {
     destroy: () => handles.forEach((h) => h.destroy()),
     pause: () => handles.forEach((h) => h.pause()),

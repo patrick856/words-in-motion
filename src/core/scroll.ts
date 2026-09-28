@@ -71,7 +71,9 @@ export function parseScrollAnchor(
     elemAnchor = parts[0];
   }
 
-  const vpPart = parts[1] || (parts[0] !== 'top' && parts[0] !== 'center' && parts[0] !== 'bottom' ? parts[0] : '80%');
+  const vpPart =
+    parts[1] ||
+    (parts[0] !== 'top' && parts[0] !== 'center' && parts[0] !== 'bottom' ? parts[0] : '80%');
 
   return {
     elementAnchor: elemAnchor,
@@ -165,11 +167,11 @@ function scrollLoop() {
   // 1. Process scrub subscribers
   let activeInViewCount = 0;
   for (const item of tracker.subscribers) {
+    const rect = item.sub.element.getBoundingClientRect();
+    const progress = calculateScrollProgress(rect, vh, item.sub.start, item.sub.end);
+    item.sub.callback(progress);
     if (item.inView) {
       activeInViewCount++;
-      const rect = item.sub.element.getBoundingClientRect();
-      const progress = calculateScrollProgress(rect, vh, item.sub.start, item.sub.end);
-      item.sub.callback(progress);
     }
   }
 
@@ -202,6 +204,7 @@ function scrollLoop() {
   for (const item of toRemoveTriggers) {
     tracker.triggers.delete(item);
   }
+  if (tracker.subscribers.size === 0 && tracker.triggers.size === 0) detachScrollListeners();
 
   if (activeInViewCount === 0) {
     stopScrollLoop();

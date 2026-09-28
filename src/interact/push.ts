@@ -1,34 +1,15 @@
 import type { BaseInteractOptions, InteractHandle, Target } from '../core/types';
 import { createInteraction } from '../core/interact';
-import { clamp } from '../core/math';
-
+import { bounded } from '../core/effect';
 export interface PushOptions extends BaseInteractOptions {
-  /** Maximum push displacement strength in pixels. Defaults to 20. */
-  strength?: number;
+  /** Maximum travel in pixels. Default 20. */ strength?: number;
 }
-
-/**
- * Anti-gravitational push cursor interact effect.
- * Translates nearby characters away from cursor with collision boundary clamping to prevent overlapping.
- */
-export function push(
-  target: Target,
-  options?: PushOptions
-): InteractHandle {
-  const strength = options?.strength ?? 20;
-
-  return createInteraction(target, options, ({ angle, progress }) => {
-    // Limit displacement so pushed characters stop before overlapping neighbors
-    const pushDistance = progress * strength;
-    const rawX = -Math.cos(angle) * pushDistance;
-    const rawY = -Math.sin(angle) * pushDistance;
-
-    const translateX = clamp(rawX, -16, 16);
-    const translateY = clamp(rawY, -16, 16);
-
-    return {
-      translateX,
-      translateY,
-    };
-  });
+/** A soft repulsion field with a smooth boundary and bounded travel. */
+export function push(target: Target, options?: PushOptions): InteractHandle {
+  const strength = bounded(options?.strength, 20, 0, 300);
+  return createInteraction(target, options, ({ angle, progress }) => ({
+    collide: true,
+    translateX: -Math.cos(angle) * progress * strength,
+    translateY: -Math.sin(angle) * progress * strength,
+  }));
 }

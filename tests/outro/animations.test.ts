@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { blackHole } from '../../src/outro/blackHole';
 import { paperCut } from '../../src/outro/paperCut';
-import { portal } from '../../src/outro/portal';
+import { hingeDrop } from '../../src/outro/hingeDrop';
 import { breakAndFade } from '../../src/outro/breakAndFade';
 
 describe('Outro Animations', () => {
@@ -36,8 +36,8 @@ describe('Outro Animations', () => {
     expect(container.textContent).toBe('Line One Outro\nLine Two Outro\nLine Three Outro');
   });
 
-  it('portal creates handle and cancels cleanly', () => {
-    const handle = portal(container);
+  it('hingeDrop creates handle and cancels cleanly', () => {
+    const handle = hingeDrop(container);
     expect(handle.finished).toBeInstanceOf(Promise);
     expect(typeof handle.cancel).toBe('function');
     handle.cancel();
