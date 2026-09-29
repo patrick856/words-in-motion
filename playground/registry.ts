@@ -24,11 +24,12 @@ import { proximityShake } from '../src/interact/proximityShake';
 import { obstaclePush } from '../src/interact/obstaclePush';
 import { fontWeight } from '../src/interact/fontWeight';
 import { accentColor } from '../src/interact/accentColor';
+import type { BaseScrollScrubOptions } from '../src/core/types';
 
 export interface AnimationEntry {
   name: string;
   category: 'intro' | 'loop' | 'outro' | 'interact' | 'scroll';
-  run: (el: HTMLElement) => {
+  run: (el: HTMLElement, options?: BaseScrollScrubOptions) => {
     finished?: Promise<void>;
     cancel?: () => void;
     destroy?: () => void;
@@ -65,9 +66,9 @@ export const registry: AnimationEntry[] = [
   { name: 'breakAndFade', category: 'outro', run: (el) => breakAndFade(el) },
 
   // Scroll animations
-  { name: 'waveRelay', category: 'scroll', run: (el) => waveRelay(el) },
-  { name: 'readingLine', category: 'scroll', run: (el) => readingLine(el) },
-  { name: 'scatterReassemble', category: 'scroll', run: (el) => scatterReassemble(el) },
+  { name: 'waveRelay', category: 'scroll', run: (el, options) => waveRelay(el, options) },
+  { name: 'readingLine', category: 'scroll', run: (el, options) => readingLine(el, options) },
+  { name: 'scatterReassemble', category: 'scroll', run: (el, options) => scatterReassemble(el, options) },
 
   // Interact / Cursor effects
   { name: 'pull', category: 'interact', run: (el) => pull(el) },

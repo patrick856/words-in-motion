@@ -129,6 +129,41 @@ h1 {
   font-style: italic;
 }
 
+.scroll-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  margin: 1rem 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.scroll-position-field {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.scroll-position-field input {
+  width: 150px;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-color);
+  color: var(--text-main);
+  font: inherit;
+}
+
+.scroll-settings-hint {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
 .cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

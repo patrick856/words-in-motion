@@ -2,8 +2,6 @@
 
 > Typographic motion for the web.
 
-![words-in-motion demo](https://via.placeholder.com/800x400?text=words-in-motion+demo)
-
 A lightweight collection of standalone, ready-to-use typographic animations, scroll-driven effects, and cursor-reactive interactions for the web built natively on the **Web Animations API (WAAPI)** and inline transforms. Zero dependencies. Tree-shakeable. Accessible.
 
 ---
@@ -35,8 +33,9 @@ import { pixelResolve } from 'words-in-motion/intro';
 
 // Animate an element by CSS selector or HTMLElement reference
 const handle = pixelResolve('#title', {
-  duration: 800,
-  stagger: 40,
+  pixelSize: 16,
+  steps: 8,
+  duration: 1600,
 });
 
 // Await completion or cancel early
@@ -170,11 +169,13 @@ states. They are intended as adaptable building blocks, not replicas of those si
 
 ### Solid letter interactions
 
-`pull`, `push`, and `obstaclePush` share contact handling. Letters move their
-neighbors when they touch instead of independently overlapping. Collision checks
-use measured text rectangles, including word-sized bodies for joined scripts.
-They preserve existing tracking at rest; this is not pixel-perfect glyph-outline
-physics. Contacts work within each target, including between its wrapped lines.
+`pull` and `push` are soft cursor fields: nearby letters move smoothly and may
+overlap, with the cursor never colliding with them. `obstaclePush` is the separate
+contact-based effect that physically moves letters out of the cursor's way.
+Collision checks use measured text rectangles, including word-sized bodies for
+joined scripts. They preserve existing tracking at rest; this is not pixel-perfect
+glyph-outline physics. Contacts work within each target, including between its
+wrapped lines.
 
 ```ts
 import { obstaclePush, proximityRotate } from 'words-in-motion/interact';
@@ -189,9 +190,10 @@ contact.destroy();
 rotation.destroy();
 ```
 
-Letters return to their measured home positions when contact ends or the effect
-is paused. Fast movement is subdivided before resolving contacts. `pull` and
-`push` retain their `radius` and pixel `strength` controls; `obstaclePush` uses
+Letters return to their measured home positions when the cursor leaves or the
+effect is paused. Fast movement is subdivided before resolving contacts.
+`pull` and `push` retain their `radius` and pixel `strength` controls;
+`obstaclePush` uses
 `cursorRadius: 0` by default for contact at the cursor tip. A larger physical
 contact area is opt-in through `cursorRadius`; `radius` does not create a force field.
 Allow enough surrounding space (or visible overflow) for the displaced letters.

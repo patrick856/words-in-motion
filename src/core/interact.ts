@@ -17,6 +17,10 @@ export interface InteractUpdateContext {
   distance: number;
   angle: number;
   progress: number; // 0..1 based on radius
+  /** Word containing the character nearest to the pointer this frame. */
+  nearestWord: HTMLElement | null;
+  /** Pointer distance to the nearest character in CSS pixels. */
+  nearestDistance: number;
   options: Required<BaseInteractOptions>;
 }
 
@@ -154,6 +158,20 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
       previousCursor = undefined;
       previousMeasures = measures;
     }
+    let nearestIndex = -1;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    if (pointer.isActive) {
+      const pointerX = pointer.x - containerRect.left;
+      const pointerY = pointer.y - containerRect.top;
+      measures.forEach((measure, index) => {
+        const distance = Math.hypot(pointerX - measure.x, pointerY - measure.y);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+    }
+    const nearestWord = nearestIndex >= 0 ? chars[nearestIndex].closest<HTMLElement>('.wim-word') : null;
     const bodies: LetterBody[] = [];
     const desired: { x: number; y: number }[] = [];
     let collisions = false;
@@ -271,6 +289,8 @@ function createComposedRenderer(ctx: ElementContext): (pointer: PointerState) =>
               distance: dist,
               angle: angleVal,
               progress,
+              nearestWord,
+              nearestDistance,
               options: inst.options,
             });
           } catch (err) {

@@ -13,6 +13,8 @@ type PlaygroundHandle = {
 };
 
 let paragraphMode = false;
+let scrollStart = 'top 80%';
+let scrollEnd = 'top 20%';
 const activeHandles = new Set<PlaygroundHandle>();
 
 function sampleText(): string {
@@ -48,6 +50,41 @@ function renderCategorySection(
   sectionHeading.className = 'section-title';
   sectionHeading.textContent = title;
   container.appendChild(sectionHeading);
+
+  if (categoryKey === 'scroll') {
+    const settings = document.createElement('div');
+    settings.className = 'scroll-settings';
+
+    const createPositionInput = (labelText: string, value: string) => {
+      const label = document.createElement('label');
+      label.className = 'scroll-position-field';
+      label.textContent = labelText;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = value;
+      input.placeholder = 'top 80%';
+      label.appendChild(input);
+      settings.appendChild(label);
+      return input;
+    };
+
+    const startInput = createPositionInput('Start', scrollStart);
+    const endInput = createPositionInput('End', scrollEnd);
+    const applyButton = document.createElement('button');
+    applyButton.textContent = 'Apply range';
+    applyButton.addEventListener('click', () => {
+      scrollStart = startInput.value.trim() || 'top 80%';
+      scrollEnd = endInput.value.trim() || 'top 20%';
+      initPlayground();
+    });
+    settings.appendChild(applyButton);
+
+    const hint = document.createElement('span');
+    hint.className = 'scroll-settings-hint';
+    hint.textContent = 'Example: top 80%, bottom 20%, or 120px';
+    settings.appendChild(hint);
+    container.appendChild(settings);
+  }
 
   if (categoryKey === 'interact') {
     const note = document.createElement('p');
@@ -99,7 +136,7 @@ function renderCategorySection(
 
       const spacerTop = document.createElement('div');
       spacerTop.className = 'scroll-spacer';
-      spacerTop.textContent = 'Scroll down ↓';
+      spacerTop.textContent = 'Scroll ↓';
 
       const stage = document.createElement('div');
       stage.className = 'stage multiline-stage';
@@ -120,7 +157,7 @@ function renderCategorySection(
         }
         scrollContainer.scrollTop = 0;
         setStageText(stage);
-        activeHandle = entry.run(stage);
+        activeHandle = entry.run(stage, { start: scrollStart, end: scrollEnd });
         if (activeHandle) activeHandles.add(activeHandle);
       };
 

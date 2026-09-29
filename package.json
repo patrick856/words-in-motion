@@ -1,6 +1,6 @@
 {
   "name": "words-in-motion",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Typographic motion for the web.",
   "author": "Patrick Marcus",
   "license": "MIT",
@@ -62,6 +62,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsup && tsc --emitDeclarationOnly",
+    "prepack": "npm run build",
     "dev": "tsup --watch",
     "playground": "vite playground",
     "temp-playground": "vite playground/temp-playground.html",
