@@ -39,7 +39,7 @@ const effects: Record<string, EffectDef> = {
   directionalReveal: {
     name: 'directionalReveal',
     category: 'intro',
-    defaultText: 'Directional Reveal Animation',
+    defaultText: 'Words that refuse to sit still.  ',
     run: (target, opts) => directionalReveal(target, opts),
   },
   lampFlicker: {
@@ -917,6 +917,9 @@ function runCurrentEffect() {
   const scrollStage = document.getElementById('scroll-stage') as HTMLElement | null;
   const scrollMultiStage = document.getElementById('scroll-multi-stage') as HTMLElement | null;
   const textInput = document.getElementById('custom-text') as HTMLTextAreaElement | null;
+
+  stage?.classList.toggle('directional-case', currentEffectKey === 'directionalReveal');
+  scrollStage?.classList.toggle('directional-case', currentEffectKey === 'directionalReveal');
 
   const options = getOptionsFromInputs();
   const textToUse = textInput?.value || effectDef.defaultText;

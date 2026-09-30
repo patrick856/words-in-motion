@@ -30,6 +30,14 @@ function checkContacts() {
       expect(Math.min(px, py), `overlap ${i},${j}`).toBeLessThan(0.02);
     }
 }
+function hasOverlap() {
+  const letters = positions();
+  return letters.some((a, i) =>
+    letters.slice(i + 1).some((b) =>
+      Math.min(14 - Math.abs(b.x - a.x), 24 - Math.abs(b.y - a.y)) > 0.02
+    )
+  );
+}
 it('default obstaclePush has no surrounding influence, even with a large radius option', () => {
   const h = obstaclePush(element, { radius: 1000, easing: 1 });
   handles.push(h);
@@ -89,9 +97,46 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-describe.each(Object.entries({ pull, push, obstaclePush }))('%s solid letters', (_name, effect) => {
-  it('prevents overlap during movement and returns every letter home on pointer leave', () => {
+describe.each(Object.entries({ pull, push }))('%s soft letters', (_name, effect) => {
+  it('allows overlap during movement and returns every letter home on pointer leave', () => {
     const h = effect(element, { easing: 0.2, strength: 60, radius: 100 });
+    handles.push(h);
+    move(20, 12);
+    expect(hasOverlap()).toBe(true);
+    for (const [x, y] of [
+      [80, 12],
+      [130, 12],
+      [50, 0],
+      [90, 30],
+      [200, 20],
+    ]) {
+      move(x, y);
+      tick(10);
+    }
+    window.dispatchEvent(new Event('blur'));
+    tick(200);
+    positions().forEach((p, i) => {
+      expect(p.x).toBeCloseTo(i * 14 + 7, 2);
+      expect(p.y).toBeCloseTo(12, 2);
+    });
+  });
+  it('pauses and resumes without nested spans', () => {
+    const h = effect(element);
+    handles.push(h);
+    move(60, 12);
+    tick(20);
+    h.pause();
+    tick(220);
+    positions().forEach((p, i) => expect(p.x).toBeCloseTo(i * 14 + 7, 2));
+    h.resume();
+    tick(20);
+    expect(positions().some((p, i) => Math.abs(p.x - (i * 14 + 7)) > 0.1)).toBe(true);
+    expect(element.querySelectorAll('.wim-char .wim-char')).toHaveLength(0);
+  });
+});
+describe('obstaclePush solid letters', () => {
+  it('prevents overlap during movement and returns every letter home on pointer leave', () => {
+    const h = obstaclePush(element, { easing: 0.2, strength: 60, radius: 100 });
     handles.push(h);
     for (const [x, y] of [
       [20, 12],
@@ -114,8 +159,8 @@ describe.each(Object.entries({ pull, push, obstaclePush }))('%s solid letters', 
       expect(p.y).toBeCloseTo(12, 2);
     });
   });
-  it('pause releases contact and resume works without nested spans', () => {
-    const h = effect(element);
+  it('releases contact on pause and resumes without nested spans', () => {
+    const h = obstaclePush(element);
     handles.push(h);
     move(60, 12);
     tick(20);
@@ -144,13 +189,18 @@ it('the solid cursor touches live bounds and moves neighboring letters', () => {
     letters.some((p, i) => Math.abs(i * 14 + 7 - 63) > 22 && Math.abs(p.x - (i * 14 + 7)) > 1)
   ).toBe(true);
 });
-it('high-strength push does not swap touching letters in one frame', () => {
+it('high-strength push stays bounded without solid contact', () => {
   const h = push(element, { strength: 150, easing: 1, radius: 90 });
   handles.push(h);
+  const home = positions();
   move(62, 12);
-  checkContacts();
   const letters = positions();
-  letters.slice(1).forEach((p, i) => expect(p.x).toBeGreaterThan(letters[i].x));
+  expect(letters).not.toEqual(home);
+  expect(hasOverlap()).toBe(true);
+  letters.forEach((p, i) => expect(Math.abs(p.x - home[i].x)).toBeLessThanOrEqual(150));
+  window.dispatchEvent(new Event('blur'));
+  tick();
+  expect(positions()).toEqual(home);
 });
 it('rotation now reaches a quarter-turn by default and respects overrides', () => {
   const h = proximityRotate(element, { easing: 1 });

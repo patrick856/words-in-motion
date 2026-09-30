@@ -38,6 +38,35 @@ describe('Intro Animations', () => {
     animateSpy.mockRestore();
   });
 
+  it('directionalReveal keeps the original text in flow and restores it after the reveal', async () => {
+    const phrase = 'Words that refuse to sit still.  ';
+    container.textContent = phrase;
+    container.style.fontFamily = 'Bricolage Grotesque';
+    const originalText = container.firstChild;
+    const originalPosition = container.style.position;
+    const originalVisibility = container.style.visibility;
+    const animateSpy = vi.spyOn(Element.prototype, 'animate');
+
+    const handle = directionalReveal(container);
+    expect(container.firstChild).toBe(originalText);
+    expect(originalText?.textContent).toBe(phrase);
+    expect(container.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    expect(Array.from(container.querySelectorAll<HTMLElement>('.wim-directional-frame'))
+      .every((frame) => frame.style.position === 'absolute')).toBe(true);
+
+    for (const result of animateSpy.mock.results) {
+      (result.value as Animation).onfinish?.(new Event('finish') as AnimationPlaybackEvent);
+    }
+    await handle.finished;
+
+    expect(container.childNodes).toHaveLength(1);
+    expect(container.firstChild).toBe(originalText);
+    expect(container.textContent).toBe(phrase);
+    expect(container.style.position).toBe(originalPosition);
+    expect(container.style.visibility).toBe(originalVisibility);
+    animateSpy.mockRestore();
+  });
+
   it('lampFlicker creates animation handle and cancels cleanly', () => {
     const handle = lampFlicker(container, { flickers: 3 });
     expect(handle.finished).toBeInstanceOf(Promise);
